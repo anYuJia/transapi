@@ -1,0 +1,10 @@
+.env
+AntiHub-scripts-main/
+.claude/
+1-本地部署/
+2-参考项目/
+3-error/
+.pnpm-store/v10/
+.kiro/
+AntiHook/.gocache/
+GeminiCLI_对接复现指南.md
