@@ -1,0 +1,21 @@
+# 用于推送到镜像仓库的配置
+# 使用方法: docker compose -f docker-compose.push.yml build && docker compose -f docker-compose.push.yml push
+
+services:
+  web:
+    build:
+      context: ./AntiHub
+      dockerfile: Dockerfile
+    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-web:${IMAGE_TAG:-latest}
+
+  backend:
+    build:
+      context: ./AntiHub-Backend
+      dockerfile: Dockerfile
+    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-backend:${IMAGE_TAG:-latest}
+
+  plugin:
+    build:
+      context: ./AntiHub-plugin
+      dockerfile: Dockerfile
+    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-plugin:${IMAGE_TAG:-latest}

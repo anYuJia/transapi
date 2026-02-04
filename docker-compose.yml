@@ -1,10 +1,10 @@
 services:
   web:
-    # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-web:latest
+    # 本地构建使用最小镜像
     build:
       context: ./AntiHub
       dockerfile: Dockerfile
-    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-web:${IMAGE_TAG:-latest}
+    image: antihub-web:${IMAGE_TAG:-latest}
     container_name: antihub-web
     environment:
       NODE_ENV: production
@@ -21,11 +21,11 @@ services:
     restart: unless-stopped
 
   backend:
-    # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-backend:latest
+    # 本地构建使用最小镜像
     build:
       context: ./AntiHub-Backend
       dockerfile: Dockerfile
-    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-backend:${IMAGE_TAG:-latest}
+    image: antihub-backend:${IMAGE_TAG:-latest}
     container_name: antihub-backend
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     environment:
@@ -75,11 +75,11 @@ services:
     restart: unless-stopped
 
   plugin:
-    # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-plugin:latest
+    # 本地构建使用最小镜像
     build:
       context: ./AntiHub-plugin
       dockerfile: Dockerfile
-    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-plugin:${IMAGE_TAG:-latest}
+    image: antihub-plugin:${IMAGE_TAG:-latest}
     container_name: antihub-plugin
     environment:
       NODE_ENV: production
