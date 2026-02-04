@@ -274,27 +274,33 @@ class KiroService:
         user_id: int,
         method: str,
         path: str,
-        json_data: Optional[Dict[str, Any]] = None
+        json_data: Optional[Dict[str, Any]] = None,
+        api_key_id: Optional[int] = None
     ):
         """
         代理流式请求到插件API的Kiro端点
-        
+
         Args:
             user_id: 用户ID
             method: HTTP方法
             path: API路径
             json_data: JSON数据
-            
+            api_key_id: API Key ID（可选，用于统计）
+
         Yields:
             流式响应数据
-            
+
         Raises:
             UpstreamAPIError: 当上游API返回错误时
         """
         api_key = await self._get_user_plugin_key(user_id)
         url = f"{self.base_url}{path}"
         headers = {"Authorization": f"Bearer {api_key}"}
-        
+
+        # 如果提供了 api_key_id，添加到请求头
+        if api_key_id is not None:
+            headers["X-Api-Key-Id"] = str(api_key_id)
+
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 method=method,
@@ -573,13 +579,15 @@ class KiroService:
     async def chat_completions_stream(
         self,
         user_id: int,
-        request_data: Dict[str, Any]
+        request_data: Dict[str, Any],
+        api_key_id: Optional[int] = None
     ):
         """Kiro聊天补全（流式，通过插件API）"""
         async for chunk in self._proxy_stream_request(
             user_id=user_id,
             method="POST",
             path="/v1/kiro/chat/completions",
-            json_data=request_data
+            json_data=request_data,
+            api_key_id=api_key_id
         ):
             yield chunk

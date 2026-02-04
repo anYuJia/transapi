@@ -34,16 +34,11 @@ from app.utils.encryption import decrypt_api_key as decrypt_secret
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
-# Gemini CLI 官方 OAuth 配置（必须通过环境变量配置）
+# Gemini CLI 官方 OAuth 配置（可选，仅在使用 Gemini CLI 功能时需要）
 # 注意：OAuth client_id/client_secret 只用于"发起 OAuth / 交换 token"，并不会让普通用户越权访问任何内部数据；
 #      真实权限仍由用户账号本身的授权与 GCP 项目侧开关决定。
 GOOGLE_CLIENT_ID = os.getenv("GEMINI_CLI_OAUTH_CLIENT_ID")
-if not GOOGLE_CLIENT_ID:
-    raise ValueError("GEMINI_CLI_OAUTH_CLIENT_ID environment variable is required")
-
 GOOGLE_CLIENT_SECRET = os.getenv("GEMINI_CLI_OAUTH_CLIENT_SECRET")
-if not GOOGLE_CLIENT_SECRET:
-    raise ValueError("GEMINI_CLI_OAUTH_CLIENT_SECRET environment variable is required")
 
 # OAuth 回调（兼容 CLIProxyAPI 的 8085 端口）
 GOOGLE_REDIRECT_URI = os.getenv(
@@ -250,6 +245,14 @@ class GeminiCLIService:
         self.redis = redis
         self.repo = GeminiCLIAccountRepository(db)
 
+    def _check_oauth_config(self):
+        """检查 OAuth 配置是否已设置"""
+        if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+            raise ValueError(
+                "Gemini CLI OAuth 配置未设置。请在环境变量中配置 "
+                "GEMINI_CLI_OAUTH_CLIENT_ID 和 GEMINI_CLI_OAUTH_CLIENT_SECRET"
+            )
+
     async def create_oauth_authorize_url(
         self,
         user_id: int,
@@ -265,6 +268,8 @@ class GeminiCLIService:
         - access_type=offline: 获取 refresh_token
         - prompt=consent: 强制弹出同意屏幕
         """
+        self._check_oauth_config()
+
         if is_shared not in (0, 1):
             raise ValueError("is_shared 必须是 0 或 1")
 
@@ -464,6 +469,8 @@ class GeminiCLIService:
 
         导入后立即使用 refresh_token 刷新 access_token
         """
+        self._check_oauth_config()
+
         if is_shared not in (0, 1):
             raise ValueError("is_shared 必须是 0 或 1")
 

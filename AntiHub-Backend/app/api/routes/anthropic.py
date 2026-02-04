@@ -123,6 +123,9 @@ async def _create_message_impl(
         # 生成请求ID
         request_id = uuid.uuid4().hex[:24]
 
+        # 获取 API Key ID（用于统计）
+        api_key_id = getattr(current_user, "_api_key_id", None)
+
         # 判断使用哪个服务
         config_type = getattr(current_user, "_config_type", None)
 
@@ -180,6 +183,7 @@ async def _create_message_impl(
                         openai_stream = kiro_service.chat_completions_stream(
                             user_id=current_user.id,
                             request_data=upstream_request,
+                            api_key_id=api_key_id,
                         )
                     else:
                         # 使用Antigravity服务
@@ -242,6 +246,7 @@ async def _create_message_impl(
             openai_stream = kiro_service.chat_completions_stream(
                 user_id=current_user.id,
                 request_data=upstream_request,
+                api_key_id=api_key_id,
             )
         else:
             # 使用Antigravity服务的流式接口

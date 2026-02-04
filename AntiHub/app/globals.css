@@ -274,3 +274,26 @@
     animation: none;
     mix-blend-mode: normal;
 }
+/* Recharts Tooltip 不透明 */
+.recharts-tooltip-wrapper {
+  opacity: 1 !important;
+}
+
+.recharts-default-tooltip {
+  opacity: 1 !important;
+}
+
+/* 强制所有 Recharts 相关元素不透明 */
+.recharts-tooltip-wrapper,
+.recharts-tooltip-wrapper *,
+.recharts-default-tooltip,
+.recharts-tooltip-cursor,
+[class*="recharts-tooltip"] {
+  opacity: 1 !important;
+}
+
+/* 确保 Tooltip 内容背景不透明 */
+.recharts-tooltip-wrapper > div {
+  opacity: 1 !important;
+  background-color: hsl(var(--background)) !important;
+}

@@ -1,0 +1,27 @@
+services:
+  web:
+    build:
+      context: ./AntiHub
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
+    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-web:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+
+  backend:
+    build:
+      context: ./AntiHub-Backend
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.10
+    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-backend:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+
+  plugin:
+    build:
+      context: ./AntiHub-plugin
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
+    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-plugin:${IMAGE_TAG:-latest}
+    platform: linux/amd64

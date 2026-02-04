@@ -45,6 +45,58 @@ database.ping().then(async (connected) => {
   } catch (error) {
     logger.warn('数据库迁移检查失败（可忽略）:', error.message);
   }
+
+  // 轻量迁移：为 kiro_consumption_log 添加 API Key 相关字段
+  try {
+    const apiKeyIdExists = await database.query(
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'kiro_consumption_log' AND column_name = 'api_key_id') AS exists"
+    );
+    if (!Boolean(apiKeyIdExists?.rows?.[0]?.exists)) {
+      logger.info('开始迁移 kiro_consumption_log 表，添加新字段...');
+
+      // 添加新字段
+      await database.query(`
+        ALTER TABLE public.kiro_consumption_log
+          ADD COLUMN IF NOT EXISTS api_key_id INTEGER,
+          ADD COLUMN IF NOT EXISTS endpoint VARCHAR(255),
+          ADD COLUMN IF NOT EXISTS method VARCHAR(10) DEFAULT 'POST',
+          ADD COLUMN IF NOT EXISTS duration_ms INTEGER DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS success BOOLEAN DEFAULT TRUE,
+          ADD COLUMN IF NOT EXISTS status_code INTEGER,
+          ADD COLUMN IF NOT EXISTS error_message TEXT,
+          ADD COLUMN IF NOT EXISTS input_tokens INTEGER DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS output_tokens INTEGER DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS total_tokens INTEGER DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS stream BOOLEAN DEFAULT FALSE
+      `);
+
+      // 添加注释
+      await database.query(`
+        COMMENT ON COLUMN public.kiro_consumption_log.api_key_id IS 'API Key ID (关联到后端的 api_keys 表)';
+        COMMENT ON COLUMN public.kiro_consumption_log.endpoint IS 'API 端点 (如 /v1/chat/completions)';
+        COMMENT ON COLUMN public.kiro_consumption_log.method IS 'HTTP 方法 (GET/POST/etc)';
+        COMMENT ON COLUMN public.kiro_consumption_log.duration_ms IS '请求耗时（毫秒）';
+        COMMENT ON COLUMN public.kiro_consumption_log.success IS '请求是否成功';
+        COMMENT ON COLUMN public.kiro_consumption_log.status_code IS 'HTTP 状态码';
+        COMMENT ON COLUMN public.kiro_consumption_log.error_message IS '错误信息（如果失败）';
+        COMMENT ON COLUMN public.kiro_consumption_log.input_tokens IS '输入 token 数量';
+        COMMENT ON COLUMN public.kiro_consumption_log.output_tokens IS '输出 token 数量';
+        COMMENT ON COLUMN public.kiro_consumption_log.total_tokens IS '总 token 数量';
+        COMMENT ON COLUMN public.kiro_consumption_log.stream IS '是否为流式请求';
+      `);
+
+      // 添加索引
+      await database.query(`
+        CREATE INDEX IF NOT EXISTS idx_kiro_consumption_api_key_id ON public.kiro_consumption_log(api_key_id);
+        CREATE INDEX IF NOT EXISTS idx_kiro_consumption_endpoint ON public.kiro_consumption_log(endpoint);
+        CREATE INDEX IF NOT EXISTS idx_kiro_consumption_success ON public.kiro_consumption_log(success);
+      `);
+
+      logger.info('数据库迁移完成：已为 kiro_consumption_log 添加 API Key 相关字段');
+    }
+  } catch (error) {
+    logger.warn('kiro_consumption_log 迁移失败（可忽略）:', error.message);
+  }
 });
 
 // 初始化Redis（用于Kiro OAuth状态存储）

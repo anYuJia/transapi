@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import {
   deleteAPIKey,
   generateAPIKey,
@@ -13,10 +13,12 @@ import {
   saveCodexFallbackConfig,
   upsertKiroSubscriptionModelRule,
   clearCodexFallbackConfig,
+  getAPIKeyUsageStats,
   type KiroSubscriptionModelRule,
   type OpenAIModel,
   type PluginAPIKey,
   type UserResponse,
+  type APIKeyUsageStats,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -34,7 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { IconCopy, IconKey, IconTrash, IconEye, IconEyeOff, IconSettings, IconPlus, IconInfoCircle, IconAlertTriangle, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { IconCopy, IconKey, IconTrash, IconEye, IconEyeOff, IconSettings, IconPlus, IconInfoCircle, IconAlertTriangle, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp } from '@tabler/icons-react';
 import { MorphingSquare } from '@/components/ui/morphing-square';
 import { cn } from '@/lib/utils';
 import Toaster, { ToasterRef } from '@/components/ui/toast';
@@ -78,6 +80,9 @@ export default function SettingsPage() {
   const [newSubscription, setNewSubscription] = useState('');
 
   const [apiEndpoint, setApiEndpoint] = useState(() => getPublicApiBaseUrl());
+  const [expandedKeyId, setExpandedKeyId] = useState<number | null>(null);
+  const [keyUsageStats, setKeyUsageStats] = useState<Record<number, APIKeyUsageStats>>({});
+  const [loadingUsageKeyId, setLoadingUsageKeyId] = useState<number | null>(null);
 
   const configTypeTotalPages = Math.ceil(CONFIG_TYPE_ORDER.length / CONFIG_TYPE_PAGE_SIZE);
   const visibleConfigTypes = CONFIG_TYPE_ORDER.slice(
@@ -369,6 +374,35 @@ export default function SettingsPage() {
     }
   };
 
+  const handleToggleUsageStats = async (keyId: number) => {
+    if (expandedKeyId === keyId) {
+      setExpandedKeyId(null);
+      return;
+    }
+
+    setExpandedKeyId(keyId);
+
+    if (keyUsageStats[keyId]) {
+      return;
+    }
+
+    setLoadingUsageKeyId(keyId);
+    try {
+      const stats = await getAPIKeyUsageStats(keyId);
+      setKeyUsageStats(prev => ({ ...prev, [keyId]: stats }));
+    } catch (err) {
+      toasterRef.current?.show({
+        title: '加载失败',
+        message: err instanceof Error ? err.message : '获取用量统计失败',
+        variant: 'error',
+        position: 'top-right',
+      });
+      setExpandedKeyId(null);
+    } finally {
+      setLoadingUsageKeyId(null);
+    }
+  };
+
   const handleOpenEditTypeDialog = (key: PluginAPIKey) => {
     setEditingKey(key);
     setEditingConfigType(key.config_type);
@@ -547,75 +581,283 @@ export default function SettingsPage() {
                         <th className="text-left p-3 text-sm font-medium min-w-[180px]">密钥</th>
                         <th className="text-left p-3 text-sm font-medium min-w-[130px]">创建时间</th>
                         <th className="text-left p-3 text-sm font-medium min-w-[130px]">最后使用</th>
+                        <th className="text-left p-3 text-sm font-medium min-w-[100px]">用量</th>
                         <th className="text-right p-3 text-sm font-medium min-w-[80px]">操作</th>
                       </tr>
                     </thead>
                     <tbody>
                       {apiKeys.map((key) => (
-                        <tr key={key.id} className="border-b last:border-b-0 hover:bg-muted/30">
-                          <td className="p-3 text-sm">
-                            {key.name}
-                          </td>
-                          <td className="p-3">
-                            {key.config_type === 'kiro' ? (
-                              <Badge>Kiro</Badge>
-                            ) : key.config_type === 'qwen' ? (
-                              <Badge variant="outline">Qwen</Badge>
-                            ) : key.config_type === 'codex' ? (
-                              <Badge variant="outline">Codex</Badge>
-                            ) : key.config_type === 'gemini-cli' ? (
-                              <Badge variant="outline">GeminiCLI</Badge>
-                            ) : key.config_type === 'zai-tts' ? (
-                              <Badge variant="outline">ZAI TTS</Badge>
-                            ) : key.config_type === 'zai-image' ? (
-                              <Badge variant="outline">ZAI Image</Badge>
-                            ) : (
-                              <Badge variant="secondary">Antigravity</Badge>
-                            )}
-                          </td>
-                          <td className="p-3 text-xs font-mono text-muted-foreground">
-                            <div className="max-w-[180px] truncate" title={key.key_preview}>
-                              {key.key_preview}
-                            </div>
-                          </td>
-                          <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(key.created_at).toLocaleString('zh-CN')}
-                          </td>
-                          <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
-                            {key.last_used_at
-                              ? new Date(key.last_used_at).toLocaleString('zh-CN')
-                              : '从未使用'
-                            }
-                          </td>
-                          <td className="p-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
+                        <Fragment key={key.id}>
+                          <tr className="border-b last:border-b-0 hover:bg-muted/30">
+                            <td className="p-3 text-sm">
+                              {key.name}
+                            </td>
+                            <td className="p-3">
+                              {key.config_type === 'kiro' ? (
+                                <Badge>Kiro</Badge>
+                              ) : key.config_type === 'qwen' ? (
+                                <Badge variant="outline">Qwen</Badge>
+                              ) : key.config_type === 'codex' ? (
+                                <Badge variant="outline">Codex</Badge>
+                              ) : key.config_type === 'gemini-cli' ? (
+                                <Badge variant="outline">GeminiCLI</Badge>
+                              ) : key.config_type === 'zai-tts' ? (
+                                <Badge variant="outline">ZAI TTS</Badge>
+                              ) : key.config_type === 'zai-image' ? (
+                                <Badge variant="outline">ZAI Image</Badge>
+                              ) : (
+                                <Badge variant="secondary">Antigravity</Badge>
+                              )}
+                            </td>
+                            <td className="p-3 text-xs font-mono text-muted-foreground">
+                              <div className="max-w-[180px] truncate" title={key.key_preview}>
+                                {key.key_preview}
+                              </div>
+                            </td>
+                            <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                              {new Date(key.created_at).toLocaleString('zh-CN')}
+                            </td>
+                            <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                              {key.last_used_at
+                                ? new Date(key.last_used_at).toLocaleString('zh-CN')
+                                : '从未使用'
+                              }
+                            </td>
+                            <td className="p-3">
                               <Button
                                 variant="ghost"
-                                size="icon"
-                                onClick={() => handleOpenEditTypeDialog(key)}
-                                disabled={deletingKeyId === key.id || isUpdatingKeyType}
-                                className="text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                                aria-label="修改类型"
+                                size="sm"
+                                onClick={() => handleToggleUsageStats(key.id)}
+                                disabled={loadingUsageKeyId === key.id}
+                                className="text-xs h-7 px-2"
                               >
-                                <IconSettings className="size-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDeleteKey(key.id)}
-                                disabled={deletingKeyId === key.id || isUpdatingKeyType}
-                                className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
-                                aria-label="删除"
-                              >
-                                {deletingKeyId === key.id ? (
-                                  <MorphingSquare className="size-4" />
+                                {loadingUsageKeyId === key.id ? (
+                                  <MorphingSquare className="size-3 mr-1" />
+                                ) : expandedKeyId === key.id ? (
+                                  <IconChevronUp className="size-3 mr-1" />
                                 ) : (
-                                  <IconTrash className="size-4" />
+                                  <IconChevronDown className="size-3 mr-1" />
                                 )}
+                                {expandedKeyId === key.id ? '收起' : '查看'}
                               </Button>
-                            </div>
-                          </td>
-                        </tr>
+                            </td>
+                            <td className="p-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleOpenEditTypeDialog(key)}
+                                  disabled={deletingKeyId === key.id || isUpdatingKeyType}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                                  aria-label="修改类型"
+                                >
+                                  <IconSettings className="size-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleDeleteKey(key.id)}
+                                  disabled={deletingKeyId === key.id || isUpdatingKeyType}
+                                  className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                                  aria-label="删除"
+                                >
+                                  {deletingKeyId === key.id ? (
+                                    <MorphingSquare className="size-4" />
+                                  ) : (
+                                    <IconTrash className="size-4" />
+                                  )}
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                          {expandedKeyId === key.id && keyUsageStats[key.id] && (
+                            <tr key={`${key.id}-usage`} className="border-b bg-muted/20">
+                              <td colSpan={7} className="p-4">
+                                <div className="space-y-4">
+                                  <div className="flex items-center justify-between">
+                                    <div className="text-sm font-medium">用量统计</div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {keyUsageStats[key.id].range.start_date && keyUsageStats[key.id].range.end_date
+                                        ? `${new Date(keyUsageStats[key.id].range.start_date!).toLocaleDateString()} - ${new Date(keyUsageStats[key.id].range.end_date!).toLocaleDateString()}`
+                                        : '全部时间'}
+                                    </div>
+                                  </div>
+
+                                  {/* 总览卡片 */}
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    <div className="bg-background rounded-lg p-3 border">
+                                      <div className="text-xs text-muted-foreground mb-1">总请求数</div>
+                                      <div className="text-2xl font-semibold">{keyUsageStats[key.id].total_requests.toLocaleString()}</div>
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        成功 {keyUsageStats[key.id].success_requests} / 失败 {keyUsageStats[key.id].failed_requests}
+                                      </div>
+                                    </div>
+                                    <div className="bg-background rounded-lg p-3 border">
+                                      <div className="text-xs text-muted-foreground mb-1">成功率</div>
+                                      <div className="text-2xl font-semibold">
+                                        {keyUsageStats[key.id].total_requests > 0
+                                          ? ((keyUsageStats[key.id].success_requests / keyUsageStats[key.id].total_requests) * 100).toFixed(1)
+                                          : 0}%
+                                      </div>
+                                      <div className="text-xs text-green-600 dark:text-green-400 mt-1">
+                                        {keyUsageStats[key.id].success_requests} 次成功
+                                      </div>
+                                    </div>
+                                    <div className="bg-background rounded-lg p-3 border">
+                                      <div className="text-xs text-muted-foreground mb-1">Token 用量</div>
+                                      <div className="text-2xl font-semibold">{keyUsageStats[key.id].total_tokens.toLocaleString()}</div>
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        输入 {keyUsageStats[key.id].input_tokens.toLocaleString()} / 输出 {keyUsageStats[key.id].output_tokens.toLocaleString()}
+                                      </div>
+                                    </div>
+                                    <div className="bg-background rounded-lg p-3 border">
+                                      <div className="text-xs text-muted-foreground mb-1">平均耗时</div>
+                                      <div className="text-2xl font-semibold">{Math.round(keyUsageStats[key.id].avg_duration_ms)}ms</div>
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        配额消耗 {keyUsageStats[key.id].total_quota_consumed.toFixed(2)}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* 按服务类型统计 */}
+                                  {Object.keys(keyUsageStats[key.id].by_config_type).length > 0 && (
+                                    <div>
+                                      <div className="text-xs font-medium text-muted-foreground mb-2">📊 按服务类型</div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                        {Object.entries(keyUsageStats[key.id].by_config_type).map(([type, stats]) => (
+                                          <div key={type} className="bg-background rounded-lg p-3 border">
+                                            <div className="flex items-center justify-between mb-2">
+                                              <span className="font-medium text-sm">{type}</span>
+                                              <Badge variant="outline" className="text-xs">
+                                                {stats.total_requests} 次
+                                              </Badge>
+                                            </div>
+                                            <div className="space-y-1 text-xs text-muted-foreground">
+                                              <div className="flex justify-between">
+                                                <span>成功率:</span>
+                                                <span className="font-medium">
+                                                  {stats.total_requests > 0
+                                                    ? ((stats.success_requests / stats.total_requests) * 100).toFixed(1)
+                                                    : 0}%
+                                                </span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span>Token:</span>
+                                                <span className="font-medium">{stats.total_tokens.toLocaleString()}</span>
+                                              </div>
+                                              <div className="flex justify-between">
+                                                <span>配额:</span>
+                                                <span className="font-medium">{stats.total_quota_consumed.toFixed(2)}</span>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* 按模型统计 */}
+                                  {Object.keys(keyUsageStats[key.id].by_model).length > 0 && (
+                                    <div>
+                                      <div className="text-xs font-medium text-muted-foreground mb-2">🤖 按模型</div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                        {Object.entries(keyUsageStats[key.id].by_model)
+                                          .sort((a, b) => b[1].total_requests - a[1].total_requests)
+                                          .slice(0, 6)
+                                          .map(([model, stats]) => (
+                                            <div key={model} className="bg-background rounded-lg p-3 border">
+                                              <div className="flex items-center justify-between mb-2">
+                                                <span className="font-medium text-xs truncate" title={model}>
+                                                  {model.length > 20 ? model.substring(0, 20) + '...' : model}
+                                                </span>
+                                                <Badge variant="secondary" className="text-xs">
+                                                  {stats.total_requests}
+                                                </Badge>
+                                              </div>
+                                              <div className="space-y-1 text-xs text-muted-foreground">
+                                                <div className="flex justify-between">
+                                                  <span>Token:</span>
+                                                  <span className="font-medium">{stats.total_tokens.toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                  <span>配额:</span>
+                                                  <span className="font-medium">{stats.total_quota_consumed.toFixed(2)}</span>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                      {Object.keys(keyUsageStats[key.id].by_model).length > 6 && (
+                                        <div className="text-xs text-muted-foreground text-center mt-2">
+                                          还有 {Object.keys(keyUsageStats[key.id].by_model).length - 6} 个模型未显示
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* 按端点统计 */}
+                                  {Object.keys(keyUsageStats[key.id].by_endpoint).length > 0 && (
+                                    <div>
+                                      <div className="text-xs font-medium text-muted-foreground mb-2">🔗 按 API 端点</div>
+                                      <div className="space-y-2">
+                                        {Object.entries(keyUsageStats[key.id].by_endpoint)
+                                          .sort((a, b) => b[1].total_requests - a[1].total_requests)
+                                          .slice(0, 5)
+                                          .map(([endpoint, stats]) => (
+                                            <div key={endpoint} className="bg-background rounded-lg p-3 border">
+                                              <div className="flex items-start justify-between mb-2">
+                                                <code className="text-xs font-mono text-muted-foreground flex-1 mr-2">
+                                                  {endpoint}
+                                                </code>
+                                                <Badge variant="outline" className="text-xs shrink-0">
+                                                  {stats.total_requests} 次
+                                                </Badge>
+                                              </div>
+                                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                                <div>
+                                                  <span className="text-muted-foreground">成功率: </span>
+                                                  <span className="font-medium">
+                                                    {stats.total_requests > 0
+                                                      ? ((stats.success_requests / stats.total_requests) * 100).toFixed(1)
+                                                      : 0}%
+                                                  </span>
+                                                </div>
+                                                <div>
+                                                  <span className="text-muted-foreground">Token: </span>
+                                                  <span className="font-medium">{stats.total_tokens.toLocaleString()}</span>
+                                                </div>
+                                                <div>
+                                                  <span className="text-muted-foreground">配额: </span>
+                                                  <span className="font-medium">{stats.total_quota_consumed.toFixed(2)}</span>
+                                                </div>
+                                                <div>
+                                                  <span className="text-muted-foreground">平均: </span>
+                                                  <span className="font-medium">{Math.round(stats.avg_duration_ms)}ms</span>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                      {Object.keys(keyUsageStats[key.id].by_endpoint).length > 5 && (
+                                        <div className="text-xs text-muted-foreground text-center mt-2">
+                                          还有 {Object.keys(keyUsageStats[key.id].by_endpoint).length - 5} 个端点未显示
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* 无数据提示 */}
+                                  {keyUsageStats[key.id].total_requests === 0 && (
+                                    <div className="text-center py-8 text-muted-foreground">
+                                      <p className="text-sm">该 API Key 暂无使用记录</p>
+                                      <p className="text-xs mt-1">使用此 API Key 发起请求后，统计数据将显示在这里</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>

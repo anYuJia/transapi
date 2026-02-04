@@ -915,6 +915,7 @@ export async function getOAuthAuthorizeUrl(isShared: number = 0): Promise<{ auth
 export interface PluginAPIKey {
   id: number;
   user_id: number;
+  key?: string; // 完整密钥（仅在详情接口返回）
   key_preview: string;
   name: string;
   config_type: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'; // 配置类型
@@ -942,6 +943,16 @@ export interface CreateAPIKeyResponse {
 export async function getAPIKeys(): Promise<PluginAPIKey[]> {
   return fetchWithAuth<PluginAPIKey[]>(
     `${API_BASE_URL}/api/api-keys`,
+    { method: 'GET' }
+  );
+}
+
+/**
+ * 获取单个 API Key 详情（包含完整密钥）
+ */
+export async function getAPIKeyDetail(keyId: number): Promise<PluginAPIKey> {
+  return fetchWithAuth<PluginAPIKey>(
+    `${API_BASE_URL}/api/api-keys/${keyId}`,
     { method: 'GET' }
   );
 }
@@ -1203,6 +1214,94 @@ export async function getRequestUsageLogs(params?: {
 
   const url = `${API_BASE_URL}/api/usage/requests/logs${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
   const result = await fetchWithAuth<{ success: boolean; data: RequestUsageLogsResponse }>(url, { method: 'GET' });
+  return result.data;
+}
+
+// ==================== API Key 用量统计 ====================
+
+export interface APIKeyUsageStats {
+  api_key_id: number;
+  api_key_name: string;
+  range: {
+    start_date: string | null;
+    end_date: string | null;
+  };
+  total_requests: number;
+  success_requests: number;
+  failed_requests: number;
+  success_rate: number;  // 成功率百分比
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  total_quota_consumed: number;
+  avg_duration_ms: number;
+  by_config_type: Record<string, {
+    total_requests: number;
+    success_requests: number;
+    failed_requests: number;
+    success_rate: number;  // 成功率百分比
+    total_tokens: number;
+    total_quota_consumed: number;
+  }>;
+  by_model: Record<string, {
+    total_requests: number;
+    success_requests: number;
+    failed_requests: number;
+    success_rate: number;  // 成功率百分比
+    total_tokens: number;
+    total_quota_consumed: number;
+  }>;
+  by_endpoint: Record<string, {
+    total_requests: number;
+    success_requests: number;
+    failed_requests: number;
+    success_rate: number;  // 成功率百分比
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    total_quota_consumed: number;
+    avg_duration_ms: number;
+  }>;
+  hourly_model_stats: Array<{
+    hour: string;
+    model_id: string;
+    quota_consumed: string;
+    request_count: string;
+  }>;
+  recent_requests: Array<{
+    id: number;
+    endpoint: string;
+    method: string;
+    model_name: string | null;
+    config_type: string | null;
+    success: boolean;
+    status_code: number | null;
+    duration_ms: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    quota_consumed: number;
+    error_message: string | null;
+    created_at: string | null;
+  }>;
+}
+
+/**
+ * 获取单个 API Key 的用量统计
+ */
+export async function getAPIKeyUsageStats(
+  keyId: number,
+  params?: {
+    start_date?: string;
+    end_date?: string;
+  }
+): Promise<APIKeyUsageStats> {
+  const queryParams = new URLSearchParams();
+  if (params?.start_date) queryParams.append('start_date', params.start_date);
+  if (params?.end_date) queryParams.append('end_date', params.end_date);
+
+  const url = `${API_BASE_URL}/api/api-keys/${keyId}/usage/stats${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  const result = await fetchWithAuth<{ success: boolean; data: APIKeyUsageStats }>(url, { method: 'GET' });
   return result.data;
 }
 

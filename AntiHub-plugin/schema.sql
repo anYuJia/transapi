@@ -535,6 +535,17 @@ CREATE TABLE public.kiro_consumption_log (
     credit_used numeric(10,4) NOT NULL,
     is_shared smallint DEFAULT 0 NOT NULL,
     consumed_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    api_key_id integer,
+    endpoint character varying(255),
+    method character varying(10) DEFAULT 'POST'::character varying,
+    duration_ms integer DEFAULT 0,
+    success boolean DEFAULT true,
+    status_code integer,
+    error_message text,
+    input_tokens integer DEFAULT 0,
+    output_tokens integer DEFAULT 0,
+    total_tokens integer DEFAULT 0,
+    stream boolean DEFAULT false,
     CONSTRAINT kiro_consumption_log_is_shared_check CHECK ((is_shared = ANY (ARRAY[0, 1])))
 );
 
@@ -594,7 +605,84 @@ COMMENT ON COLUMN public.kiro_consumption_log.is_shared IS '是否使用共享�
 -- Name: COLUMN kiro_consumption_log.consumed_at; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.kiro_consumption_log.consumed_at IS '消耗时??';
+COMMENT ON COLUMN public.kiro_consumption_log.consumed_at IS '消耗时间';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.api_key_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.api_key_id IS 'API Key ID (关联到后端的 api_keys 表)';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.endpoint; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.endpoint IS 'API 端点 (如 /v1/chat/completions)';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.method; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.method IS 'HTTP 方法 (GET/POST/etc)';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.duration_ms; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.duration_ms IS '请求耗时（毫秒）';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.success; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.success IS '请求是否成功';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.status_code; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.status_code IS 'HTTP 状态码';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.error_message; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.error_message IS '错误信息（如果失败）';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.input_tokens; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.input_tokens IS '输入 token 数量';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.output_tokens; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.output_tokens IS '输出 token 数量';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.total_tokens; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.total_tokens IS '总 token 数量';
+
+
+--
+-- Name: COLUMN kiro_consumption_log.stream; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.kiro_consumption_log.stream IS '是否为流式请求';
 
 
 --
@@ -1230,6 +1318,27 @@ CREATE INDEX idx_kiro_consumption_model_id ON public.kiro_consumption_log USING 
 --
 
 CREATE INDEX idx_kiro_consumption_user_id ON public.kiro_consumption_log USING btree (user_id);
+
+
+--
+-- Name: idx_kiro_consumption_api_key_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_kiro_consumption_api_key_id ON public.kiro_consumption_log USING btree (api_key_id);
+
+
+--
+-- Name: idx_kiro_consumption_endpoint; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_kiro_consumption_endpoint ON public.kiro_consumption_log USING btree (endpoint);
+
+
+--
+-- Name: idx_kiro_consumption_success; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_kiro_consumption_success ON public.kiro_consumption_log USING btree (success);
 
 
 --

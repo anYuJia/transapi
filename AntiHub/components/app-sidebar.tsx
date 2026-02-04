@@ -6,7 +6,8 @@ import {
   IconDashboard,
   IconListDetails,
   IconSettings,
-  IconUserCircle
+  IconUserCircle,
+  IconKey
 } from "@tabler/icons-react"
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
@@ -38,6 +39,11 @@ const data = {
       title: "账号管理",
       url: "/dashboard/accounts",
       icon: IconListDetails,
+    },
+    {
+      title: "API Keys",
+      url: "/dashboard/api-keys",
+      icon: IconKey,
     },
     {
       title: "用量统计",

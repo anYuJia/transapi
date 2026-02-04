@@ -917,6 +917,12 @@ router.post('/v1/kiro/chat/completions', authenticateApiKey, async (req, res) =>
   req.setTimeout(600000); // 10分钟 = 600000毫秒
   res.setTimeout(600000);
 
+  // 从请求头中获取 API Key ID（用于统计）
+  // 如果没有提供，尝试从环境变量获取默认值
+  const apiKeyId = req.headers['x-api-key-id']
+    ? parseInt(req.headers['x-api-key-id'])
+    : (process.env.DEFAULT_API_KEY_ID ? parseInt(process.env.DEFAULT_API_KEY_ID) : null);
+
   const { messages, model, stream = true, tools, tool_choice, conversationState, conversation_state } = req.body;
   const rawConversationState = conversationState || conversation_state;
   const hasConversationState = rawConversationState && typeof rawConversationState === 'object';
@@ -929,7 +935,13 @@ router.post('/v1/kiro/chat/completions', authenticateApiKey, async (req, res) =>
     return res.status(400).json({ error: 'model是必需的' });
   }
 
-  const options = { tools, tool_choice };
+  const options = {
+    tools,
+    tool_choice,
+    api_key_id: apiKeyId,
+    _startTime: Date.now(), // 记录请求开始时间
+    _stream: stream // 记录是否为流式请求
+  };
 
   // 模型内置联网（对接 Kiro MCP web_search）
   // 参考 kiro.rs：仅当 tools 只包含一个 web_search 时，走内置 WebSearch 分支。
@@ -1629,6 +1641,34 @@ router.post('/v1/kiro/chat/completions', authenticateApiKey, async (req, res) =>
         type: errorType
       });
     }
+  }
+});
+
+/**
+ * 按 API Key 获取消费统计
+ * GET /api/kiro/usage/by-api-key/:api_key_id
+ */
+router.get('/api/kiro/usage/by-api-key/:api_key_id', authenticateApiKey, requireAdmin, async (req, res) => {
+  try {
+    const { api_key_id } = req.params;
+    const { start_date, end_date } = req.query;
+
+    if (!api_key_id || isNaN(parseInt(api_key_id))) {
+      return res.status(400).json({ error: 'Invalid api_key_id' });
+    }
+
+    const stats = await kiroConsumptionService.getStatsByApiKey(parseInt(api_key_id), {
+      start_date,
+      end_date
+    });
+
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    logger.error('获取API Key消费统计失败:', error.message);
+    res.status(500).json({ error: '获取统计失败' });
   }
 });
 

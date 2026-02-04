@@ -1332,6 +1332,7 @@ async def chat_completions(
                         async for chunk in kiro_service.chat_completions_stream(
                             user_id=current_user.id,
                             request_data=request.model_dump(),
+                            api_key_id=api_key_id
                         ):
                             if isinstance(chunk, (bytes, bytearray)):
                                 tracker.feed(bytes(chunk))
@@ -1408,6 +1409,7 @@ async def chat_completions(
             openai_stream = kiro_service.chat_completions_stream(
                 user_id=current_user.id,
                 request_data=request.model_dump(),
+                api_key_id=api_key_id
             )
         else:
             openai_stream = antigravity_service.proxy_stream_request(

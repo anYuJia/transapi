@@ -8,8 +8,12 @@ import projectService from './project.service.js';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-if (!CLIENT_SECRET) {
-  throw new Error('GOOGLE_CLIENT_SECRET environment variable is required');
+
+// OAuth 配置检查函数（延迟到实际使用时）
+function checkOAuthConfig() {
+  if (!CLIENT_SECRET) {
+    throw new Error('GOOGLE_CLIENT_SECRET environment variable is required for Antigravity OAuth');
+  }
 }
 
 const SCOPES = [
@@ -41,6 +45,8 @@ class OAuthService {
    * @returns {Object} 包含auth_url和state的对象
    */
   generateAuthUrl(user_id, is_shared = 0) {
+    checkOAuthConfig(); // 检查 OAuth 配置
+
     const state = crypto.randomUUID();
     const callbackUrl = this.getCallbackUrl();
     

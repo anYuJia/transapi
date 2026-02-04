@@ -1,54 +1,40 @@
 # ============================================
-# AntiHub-Backend Dockerfile
+# AntiHub-Backend - 简化版 Dockerfile
 # ============================================
-
-# ============ 构建阶段 ============
-FROM python:3.10-slim-bookworm AS builder
-
-WORKDIR /build
-
-# 安装 uv（超快的 Python 包管理器）
-RUN pip install uv --no-cache-dir
-
-# 复制依赖文件
-COPY pyproject.toml uv.lock* ./
-
-# 安装依赖到虚拟环境（使用 lock，且不尝试安装本项目本身）
-RUN uv venv /opt/venv && \
-    . /opt/venv/bin/activate && \
-    uv sync --frozen --no-dev --active --no-install-project
-
-# ============ 运行阶段 ============
-FROM python:3.10-slim-bookworm AS runner
+FROM python:3.10-slim
 
 WORKDIR /app
 
-# 创建非 root 用户（安全最佳实践）
-ARG UID=10001
-ARG GID=10001
-RUN groupadd --gid $GID appgroup && \
-    useradd --uid $UID --gid $GID --shell /bin/bash --create-home appuser
+# 复制依赖文件
+COPY pyproject.toml ./
 
-# 复制虚拟环境
-COPY --from=builder /opt/venv /opt/venv
+# 安装依赖（使用 uv，只安装依赖不安装项目本身）
+RUN pip install --no-cache-dir uv && \
+    uv pip install --system --no-cache \
+    fastapi==0.104.1 \
+    uvicorn[standard]==0.24.0 \
+    sqlalchemy==2.0.23 \
+    asyncpg==0.29.0 \
+    alembic==1.12.1 \
+    redis==5.0.1 \
+    pyjwt==2.8.0 \
+    passlib[bcrypt]==1.7.4 \
+    cryptography==41.0.7 \
+    httpx==0.25.2 \
+    pydantic==2.5.2 \
+    pydantic-settings==2.1.0 \
+    python-dotenv==1.0.0 \
+    python-multipart==0.0.6
 
 # 复制应用代码
 COPY . .
 
-# 设置虚拟环境
-ENV PATH="/opt/venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1 \
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
-
-# 切换到非 root 用户
-USER appuser
 
 # 暴露端口
 EXPOSE 8000
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/api/health', timeout=5)" || exit 1
-
-# 启动命令
-CMD ["sh", "-c", "alembic upgrade heads && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# 启动命令（先运行数据库迁移，再启动服务）
+CMD ["sh", "-c", "alembic upgrade head || alembic stamp head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

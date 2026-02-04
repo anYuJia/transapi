@@ -92,8 +92,11 @@ class KiroClient {
   async generateResponse(messages, model, callback, user_id, options = {}, accountOverride = null) {
     const account = accountOverride || await this.getAvailableAccount(user_id, [], model);
     const requestId = crypto.randomUUID().substring(0, 8);
-    
-    logger.info(`[${requestId}] 开始Kiro请求: model=${model}, user_id=${user_id}, account_id=${account.account_id}`);
+
+    // 从 options 中提取 api_key_id（用于统计）
+    const apiKeyId = options.api_key_id || null;
+
+    logger.info(`[${requestId}] 开始Kiro请求: model=${model}, user_id=${user_id}, account_id=${account.account_id}, api_key_id=${apiKeyId}, start_time=${options._startTime}, stream=${options._stream}`);
 
     // 转换请求格式
     const cwRequest = kiroService.convertToCodeWhispererRequest(messages, model, options);
@@ -139,9 +142,15 @@ class KiroClient {
           user_id,
           account_id: account.account_id,
           model_id: model,
-          is_shared: account.is_shared
+          is_shared: account.is_shared,
+          api_key_id: apiKeyId,
+          endpoint: '/v1/chat/completions',
+          method: 'POST',
+          start_time: options._startTime || Date.now(),
+          stream: options._stream !== undefined ? options._stream : true,
+          status_code: res.statusCode
         };
-        
+
         this.handleStreamResponse(res, callback, requestId, contextInfo)
           .then(() => {
             logger.info(`[${requestId}] 请求完成`);
@@ -169,7 +178,10 @@ class KiroClient {
     const account = accountOverride || await this.getAvailableAccount(user_id, [], model);
     const requestId = crypto.randomUUID().substring(0, 8);
 
-    logger.info(`[${requestId}] 开始Kiro请求(raw): model=${model}, user_id=${user_id}, account_id=${account.account_id}`);
+    // 从 options 中提取 api_key_id（用于统计）
+    const apiKeyId = options.api_key_id || null;
+
+    logger.info(`[${requestId}] 开始Kiro请求(raw): model=${model}, user_id=${user_id}, account_id=${account.account_id}, api_key_id=${apiKeyId}`);
 
     if (!cwRequest || typeof cwRequest !== 'object' || !cwRequest.conversationState) {
       throw new Error('cwRequest.conversationState 缺失，无法调用 Kiro');
@@ -230,7 +242,13 @@ class KiroClient {
           user_id,
           account_id: account.account_id,
           model_id: model,
-          is_shared: account.is_shared
+          is_shared: account.is_shared,
+          api_key_id: apiKeyId,
+          endpoint: '/v1/chat/completions',
+          method: 'POST',
+          start_time: options._startTime || Date.now(),
+          stream: options._stream !== undefined ? options._stream : true,
+          status_code: res.statusCode
         };
 
         this.handleStreamResponse(res, callback, requestId, contextInfo)
@@ -290,6 +308,8 @@ class KiroClient {
    * @param {Object} contextInfo - 上下文信息（user_id, account_id, model_id, is_shared）
    */
   async handleStreamResponse(response, callback, requestId, contextInfo) {
+    logger.info(`[${requestId}] handleStreamResponse contextInfo: start_time=${contextInfo.start_time}, stream=${contextInfo.stream}, status_code=${contextInfo.status_code}`);
+
     let buffer = Buffer.alloc(0);
     let messageCount = 0;
     // 跟踪工具调用：toolUseId -> index 的映射
@@ -453,10 +473,23 @@ class KiroClient {
 
     // 处理usage消息（记录消费日志并更新账号余额）
     if (message.usage && typeof message.usage === 'number' && contextInfo) {
-      logger.info(`[${requestId}] 检测到usage: ${message.usage}, 准备记录消费日志并更新余额`);
-      
+      // 计算请求耗时
+      const duration_ms = contextInfo.start_time ? Date.now() - contextInfo.start_time : 0;
+
+      logger.info(`[${requestId}] 检测到usage: ${message.usage}, 准备记录消费日志并更新余额 (duration: ${duration_ms}ms, start_time: ${contextInfo.start_time})`);
+
+      // 从 contextInfo 中提取额外信息
+      const additionalInfo = {
+        input_tokens: contextInfo.input_tokens || 0,
+        output_tokens: contextInfo.output_tokens || 0,
+        total_tokens: contextInfo.total_tokens || 0,
+        duration_ms: duration_ms,
+        status_code: contextInfo.status_code || null,
+        stream: contextInfo.stream !== undefined ? contextInfo.stream : true
+      };
+
       // 异步记录消费日志并更新余额，不阻塞响应流
-      this.logConsumptionAndUpdateBalance(requestId, contextInfo, message.usage)
+      this.logConsumptionAndUpdateBalance(requestId, contextInfo, message.usage, additionalInfo)
         .catch(error => {
           logger.error(`[${requestId}] 记录消费日志或更新余额失败:`, error.message);
         });
@@ -468,15 +501,25 @@ class KiroClient {
    * @param {string} requestId - 请求ID
    * @param {Object} contextInfo - 上下文信息
    * @param {number} creditUsed - 消耗的credit
+   * @param {Object} additionalInfo - 额外信息（tokens, duration, status等）
    */
-  async logConsumptionAndUpdateBalance(requestId, contextInfo, creditUsed) {
+  async logConsumptionAndUpdateBalance(requestId, contextInfo, creditUsed, additionalInfo = {}) {
     // 1. 记录消费日志
     await kiroConsumptionService.logConsumption({
       user_id: contextInfo.user_id,
       account_id: contextInfo.account_id,
       model_id: contextInfo.model_id,
       credit_used: creditUsed,
-      is_shared: contextInfo.is_shared
+      is_shared: contextInfo.is_shared,
+      api_key_id: contextInfo.api_key_id || null,
+      endpoint: contextInfo.endpoint || null,
+      method: contextInfo.method || 'POST',
+      input_tokens: additionalInfo.input_tokens || 0,
+      output_tokens: additionalInfo.output_tokens || 0,
+      total_tokens: additionalInfo.total_tokens || 0,
+      duration_ms: additionalInfo.duration_ms || 0,
+      status_code: additionalInfo.status_code || null,
+      stream: additionalInfo.stream !== undefined ? additionalInfo.stream : true
     });
 
     // 2. 获取账号信息

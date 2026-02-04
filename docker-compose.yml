@@ -1,6 +1,9 @@
 services:
   web:
     # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-web:latest
+    build:
+      context: ./AntiHub
+      dockerfile: Dockerfile
     image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-web:${IMAGE_TAG:-latest}
     container_name: antihub-web
     environment:
@@ -19,9 +22,12 @@ services:
 
   backend:
     # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-backend:latest
+    build:
+      context: ./AntiHub-Backend
+      dockerfile: Dockerfile
     image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-backend:${IMAGE_TAG:-latest}
     container_name: antihub-backend
-    command: ["sh", "-c", "alembic upgrade heads && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     environment:
       APP_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -70,6 +76,9 @@ services:
 
   plugin:
     # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-plugin:latest
+    build:
+      context: ./AntiHub-plugin
+      dockerfile: Dockerfile
     image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-plugin:${IMAGE_TAG:-latest}
     container_name: antihub-plugin
     environment:
