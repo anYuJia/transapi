@@ -6,6 +6,8 @@ import {
   generateAPIKey,
   getAPIKeys,
   updateAPIKeyType,
+  updateAPIKeyAccounts,
+  getAccountsByType,
   getCodexFallbackConfig,
   getCurrentUser,
   getKiroSubscriptionModelRules,
@@ -19,6 +21,7 @@ import {
   type PluginAPIKey,
   type UserResponse,
   type APIKeyUsageStats,
+  type AccountSummary,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -72,6 +75,19 @@ export default function SettingsPage() {
   const [keyName, setKeyName] = useState('');
   const [currentUser, setCurrentUser] = useState<UserResponse | null>(null);
 
+  // 账号选择相关状态
+  const [useAllAccounts, setUseAllAccounts] = useState(true);
+  const [availableAccounts, setAvailableAccounts] = useState<AccountSummary[]>([]);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
+
+  // 编辑账号对话框
+  const [isEditAccountsDialogOpen, setIsEditAccountsDialogOpen] = useState(false);
+  const [editingAccountsKey, setEditingAccountsKey] = useState<PluginAPIKey | null>(null);
+  const [editUseAllAccounts, setEditUseAllAccounts] = useState(true);
+  const [editSelectedAccountIds, setEditSelectedAccountIds] = useState<number[]>([]);
+  const [isUpdatingAccounts, setIsUpdatingAccounts] = useState(false);
+
   const isAdmin = (currentUser?.trust_level ?? 0) >= 3;
   const [kiroModels, setKiroModels] = useState<OpenAIModel[]>([]);
   const [subscriptionRules, setSubscriptionRules] = useState<KiroSubscriptionModelRule[]>([]);
@@ -109,6 +125,40 @@ export default function SettingsPage() {
     if (!isCreateDialogOpen) return;
     const index = CONFIG_TYPE_ORDER.indexOf(selectedConfigType);
     setConfigTypePage(index >= 0 ? Math.floor(index / CONFIG_TYPE_PAGE_SIZE) : 0);
+  }, [isCreateDialogOpen, selectedConfigType]);
+
+  // 当创建对话框中的类型改变时，加载对应的账号列表
+  useEffect(() => {
+    if (!isCreateDialogOpen) return;
+    // 只有支持账号选择的类型才加载账号
+    const supportsAccountSelection = ['codex', 'gemini-cli', 'zai-tts', 'zai-image'].includes(selectedConfigType);
+    if (!supportsAccountSelection) {
+      setAvailableAccounts([]);
+      setUseAllAccounts(true);
+      setSelectedAccountIds([]);
+      return;
+    }
+
+    const loadAccounts = async () => {
+      setIsLoadingAccounts(true);
+      try {
+        const accounts = await getAccountsByType(selectedConfigType);
+        setAvailableAccounts(accounts);
+        // 默认全选
+        setSelectedAccountIds(accounts.map(a => a.account_id));
+      } catch (err) {
+        setAvailableAccounts([]);
+        toasterRef.current?.show({
+          title: '加载失败',
+          message: err instanceof Error ? err.message : '获取账号列表失败',
+          variant: 'warning',
+          position: 'top-right',
+        });
+      } finally {
+        setIsLoadingAccounts(false);
+      }
+    };
+    loadAccounts();
   }, [isCreateDialogOpen, selectedConfigType]);
 
   const loadAPIKeys = async () => {
@@ -303,6 +353,9 @@ export default function SettingsPage() {
   const handleOpenCreateDialog = () => {
     setKeyName('');
     setSelectedConfigType('antigravity');
+    setUseAllAccounts(true);
+    setAvailableAccounts([]);
+    setSelectedAccountIds([]);
     setIsCreateDialogOpen(true);
   };
 
@@ -320,7 +373,14 @@ export default function SettingsPage() {
     setIsGenerating(true);
 
     try {
-      const result = await generateAPIKey(keyName, selectedConfigType);
+      // 确定 allowed_account_ids 参数
+      const supportsAccountSelection = ['codex', 'gemini-cli', 'zai-tts', 'zai-image'].includes(selectedConfigType);
+      let allowedAccountIds: number[] | null | undefined = undefined;
+      if (supportsAccountSelection) {
+        allowedAccountIds = useAllAccounts ? null : selectedAccountIds;
+      }
+
+      const result = await generateAPIKey(keyName, selectedConfigType, allowedAccountIds);
       setNewApiKey(result.key);
       setShowApiKey(true);
       setIsDialogOpen(true);
@@ -407,6 +467,63 @@ export default function SettingsPage() {
     setEditingKey(key);
     setEditingConfigType(key.config_type);
     setIsEditTypeDialogOpen(true);
+  };
+
+  const handleOpenEditAccountsDialog = async (key: PluginAPIKey) => {
+    setEditingAccountsKey(key);
+    setEditUseAllAccounts(key.allowed_account_ids === null);
+    setEditSelectedAccountIds(key.allowed_account_ids || []);
+    setIsEditAccountsDialogOpen(true);
+
+    // 加载账号列表
+    const supportsAccountSelection = ['codex', 'gemini-cli', 'zai-tts', 'zai-image'].includes(key.config_type);
+    if (supportsAccountSelection) {
+      setIsLoadingAccounts(true);
+      try {
+        const accounts = await getAccountsByType(key.config_type);
+        setAvailableAccounts(accounts);
+      } catch (err) {
+        setAvailableAccounts([]);
+        toasterRef.current?.show({
+          title: '加载失败',
+          message: err instanceof Error ? err.message : '获取账号列表失败',
+          variant: 'warning',
+          position: 'top-right',
+        });
+      } finally {
+        setIsLoadingAccounts(false);
+      }
+    } else {
+      setAvailableAccounts([]);
+    }
+  };
+
+  const handleUpdateAccounts = async () => {
+    if (!editingAccountsKey) return;
+
+    setIsUpdatingAccounts(true);
+    try {
+      const allowedAccountIds = editUseAllAccounts ? null : editSelectedAccountIds;
+      await updateAPIKeyAccounts(editingAccountsKey.id, allowedAccountIds);
+      toasterRef.current?.show({
+        title: '已更新',
+        message: 'API密钥账号设置已修改',
+        variant: 'success',
+        position: 'top-right',
+      });
+      await loadAPIKeys();
+      setIsEditAccountsDialogOpen(false);
+      setEditingAccountsKey(null);
+    } catch (err) {
+      toasterRef.current?.show({
+        title: '更新失败',
+        message: err instanceof Error ? err.message : '更新API密钥账号失败',
+        variant: 'error',
+        position: 'top-right',
+      });
+    } finally {
+      setIsUpdatingAccounts(false);
+    }
   };
 
   const handleUpdateKeyType = async () => {
@@ -578,11 +695,12 @@ export default function SettingsPage() {
                       <tr className="border-b bg-muted/50">
                         <th className="text-left p-3 text-sm font-medium min-w-[120px]">名称</th>
                         <th className="text-left p-3 text-sm font-medium min-w-[100px]">类型</th>
+                        <th className="text-left p-3 text-sm font-medium min-w-[80px]">账号</th>
                         <th className="text-left p-3 text-sm font-medium min-w-[180px]">密钥</th>
                         <th className="text-left p-3 text-sm font-medium min-w-[130px]">创建时间</th>
                         <th className="text-left p-3 text-sm font-medium min-w-[130px]">最后使用</th>
                         <th className="text-left p-3 text-sm font-medium min-w-[100px]">用量</th>
-                        <th className="text-right p-3 text-sm font-medium min-w-[80px]">操作</th>
+                        <th className="text-right p-3 text-sm font-medium min-w-[100px]">操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -607,6 +725,26 @@ export default function SettingsPage() {
                                 <Badge variant="outline">ZAI Image</Badge>
                               ) : (
                                 <Badge variant="secondary">Antigravity</Badge>
+                              )}
+                            </td>
+                            <td className="p-3 text-xs text-muted-foreground">
+                              {['codex', 'gemini-cli', 'zai-tts', 'zai-image'].includes(key.config_type) ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleOpenEditAccountsDialog(key)}
+                                  className="h-6 px-2 text-xs"
+                                >
+                                  {key.allowed_account_ids === null ? (
+                                    '全部账号'
+                                  ) : key.allowed_account_ids.length === 0 ? (
+                                    <span className="text-yellow-600">无账号</span>
+                                  ) : (
+                                    `${key.allowed_account_ids.length} 个账号`
+                                  )}
+                                </Button>
+                              ) : (
+                                <span className="text-muted-foreground/50">-</span>
                               )}
                             </td>
                             <td className="p-3 text-xs font-mono text-muted-foreground">
@@ -672,7 +810,7 @@ export default function SettingsPage() {
                           </tr>
                           {expandedKeyId === key.id && keyUsageStats[key.id] && (
                             <tr key={`${key.id}-usage`} className="border-b bg-muted/20">
-                              <td colSpan={7} className="p-4">
+                              <td colSpan={8} className="p-4">
                                 <div className="space-y-4">
                                   <div className="flex items-center justify-between">
                                     <div className="text-sm font-medium">用量统计</div>
@@ -1359,6 +1497,69 @@ export default function SettingsPage() {
                 </div>
               </label>
             </div>
+
+            {/* 账号选择（仅支持 codex, gemini-cli, zai-tts, zai-image） */}
+            {['codex', 'gemini-cli', 'zai-tts', 'zai-image'].includes(selectedConfigType) && (
+              <div className="space-y-3 pt-2 border-t">
+                <Label>账号选择</Label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={useAllAccounts}
+                    onCheckedChange={(checked) => {
+                      setUseAllAccounts(!!checked);
+                      if (checked) {
+                        setSelectedAccountIds(availableAccounts.map(a => a.account_id));
+                      }
+                    }}
+                    disabled={isLoadingAccounts}
+                  />
+                  <span className="text-sm">使用全部账号</span>
+                </label>
+
+                {!useAllAccounts && (
+                  <div className="space-y-2">
+                    {isLoadingAccounts ? (
+                      <div className="flex items-center justify-center py-4">
+                        <MorphingSquare className="size-4" />
+                      </div>
+                    ) : availableAccounts.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-2">
+                        暂无可用账号，请先在账户管理中添加账号
+                      </div>
+                    ) : (
+                      <div className="max-h-[200px] overflow-y-auto space-y-2 border rounded-lg p-3">
+                        {availableAccounts.map((account) => (
+                          <label key={account.account_id} className="flex items-center gap-2 cursor-pointer">
+                            <Checkbox
+                              checked={selectedAccountIds.includes(account.account_id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedAccountIds([...selectedAccountIds, account.account_id]);
+                                } else {
+                                  setSelectedAccountIds(selectedAccountIds.filter(id => id !== account.account_id));
+                                }
+                              }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{account.account_name}</div>
+                              {account.email && (
+                                <div className="text-xs text-muted-foreground truncate">{account.email}</div>
+                              )}
+                            </div>
+                            {account.status === 0 && (
+                              <Badge variant="secondary" className="text-xs">禁用</Badge>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      已选择 {selectedAccountIds.length} 个账号
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -1502,6 +1703,110 @@ export default function SettingsPage() {
           <DialogFooter>
             <Button onClick={handleCloseDialog}>
               我已保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑账号选择弹窗 */}
+      <Dialog
+        open={isEditAccountsDialogOpen}
+        onOpenChange={(open) => {
+          setIsEditAccountsDialogOpen(open);
+          if (!open) {
+            setEditingAccountsKey(null);
+            setAvailableAccounts([]);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>编辑账号选择</DialogTitle>
+            <DialogDescription>
+              {editingAccountsKey ? `密钥：${editingAccountsKey.name}` : '选择此密钥可使用的账号'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                checked={editUseAllAccounts}
+                onCheckedChange={(checked) => {
+                  setEditUseAllAccounts(!!checked);
+                  if (checked) {
+                    setEditSelectedAccountIds(availableAccounts.map(a => a.account_id));
+                  }
+                }}
+                disabled={isLoadingAccounts || isUpdatingAccounts}
+              />
+              <span className="text-sm">使用全部账号</span>
+            </label>
+
+            {!editUseAllAccounts && (
+              <div className="space-y-2">
+                {isLoadingAccounts ? (
+                  <div className="flex items-center justify-center py-4">
+                    <MorphingSquare className="size-4" />
+                  </div>
+                ) : availableAccounts.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-2">
+                    暂无可用账号，请先在账户管理中添加账号
+                  </div>
+                ) : (
+                  <div className="max-h-[300px] overflow-y-auto space-y-2 border rounded-lg p-3">
+                    {availableAccounts.map((account) => (
+                      <label key={account.account_id} className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={editSelectedAccountIds.includes(account.account_id)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setEditSelectedAccountIds([...editSelectedAccountIds, account.account_id]);
+                            } else {
+                              setEditSelectedAccountIds(editSelectedAccountIds.filter(id => id !== account.account_id));
+                            }
+                          }}
+                          disabled={isUpdatingAccounts}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">{account.account_name}</div>
+                          {account.email && (
+                            <div className="text-xs text-muted-foreground truncate">{account.email}</div>
+                          )}
+                        </div>
+                        {account.status === 0 && (
+                          <Badge variant="secondary" className="text-xs">禁用</Badge>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  已选择 {editSelectedAccountIds.length} 个账号
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsEditAccountsDialogOpen(false)}
+              disabled={isUpdatingAccounts}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleUpdateAccounts}
+              disabled={isUpdatingAccounts || isLoadingAccounts}
+            >
+              {isUpdatingAccounts ? (
+                <>
+                  <MorphingSquare className="size-4 mr-2" />
+                  保存中...
+                </>
+              ) : (
+                '保存'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

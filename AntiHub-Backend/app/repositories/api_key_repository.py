@@ -12,19 +12,26 @@ from app.models.api_key import APIKey
 
 class APIKeyRepository:
     """API密钥Repository类"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
-    async def create(self, user_id: int, name: Optional[str] = None, config_type: str = "antigravity") -> APIKey:
+
+    async def create(
+        self,
+        user_id: int,
+        name: Optional[str] = None,
+        config_type: str = "antigravity",
+        allowed_account_ids: Optional[List[int]] = None,
+    ) -> APIKey:
         """
         创建新的API密钥
-        
+
         Args:
             user_id: 用户ID
             name: 密钥名称
             config_type: 配置类型（antigravity 或 kiro）
-            
+            allowed_account_ids: 允许使用的账号ID列表；None=全部账号
+
         Returns:
             创建的API密钥对象
         """
@@ -32,7 +39,8 @@ class APIKeyRepository:
             user_id=user_id,
             key=APIKey.generate_key(),
             name=name,
-            config_type=config_type
+            config_type=config_type,
+            allowed_account_ids=allowed_account_ids,
         )
         self.db.add(api_key)
         await self.db.flush()
@@ -139,18 +147,43 @@ class APIKeyRepository:
     async def update_type(self, key_id: int, user_id: int, config_type: str) -> Optional[APIKey]:
         """
         更新密钥类型
-        
+
         Args:
             key_id: 密钥ID
             user_id: 用户ID（用于验证权限）
             config_type: 配置类型（antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image）
-            
+
         Returns:
             更新后的API密钥对象
         """
         api_key = await self.get_by_id(key_id)
         if api_key and api_key.user_id == user_id:
             api_key.config_type = config_type
+            await self.db.flush()
+            await self.db.refresh(api_key)
+            return api_key
+        return None
+
+    async def update_allowed_accounts(
+        self,
+        key_id: int,
+        user_id: int,
+        allowed_account_ids: Optional[List[int]],
+    ) -> Optional[APIKey]:
+        """
+        更新密钥允许使用的账号列表
+
+        Args:
+            key_id: 密钥ID
+            user_id: 用户ID（用于验证权限）
+            allowed_account_ids: 允许使用的账号ID列表；None=全部账号，[]=无账号
+
+        Returns:
+            更新后的API密钥对象
+        """
+        api_key = await self.get_by_id(key_id)
+        if api_key and api_key.user_id == user_id:
+            api_key.allowed_account_ids = allowed_account_ids
             await self.db.flush()
             await self.db.refresh(api_key)
             return api_key

@@ -19,6 +19,8 @@ from app.schemas.api_key import (
     APIKeyListResponse,
     APIKeyUpdateStatus,
     APIKeyUpdateType,
+    APIKeyUpdateAccounts,
+    AccountSummary,
 )
 
 
@@ -44,7 +46,8 @@ async def create_api_key(
         api_key = await repo.create(
             user_id=current_user.id,
             name=request.name,
-            config_type=request.config_type
+            config_type=request.config_type,
+            allowed_account_ids=request.allowed_account_ids,
         )
         await db.commit()
         return APIKeyResponse.model_validate(api_key)
@@ -72,7 +75,7 @@ async def list_api_keys(
     try:
         repo = APIKeyRepository(db)
         keys = await repo.get_by_user_id(current_user.id)
-        
+
         # 转换为列表响应，只显示密钥前8位
         return [
             APIKeyListResponse(
@@ -84,7 +87,9 @@ async def list_api_keys(
                 is_active=key.is_active,
                 created_at=key.created_at,
                 last_used_at=key.last_used_at,
-                expires_at=key.expires_at
+                expires_at=key.expires_at,
+                allowed_account_ids=key.allowed_account_ids,
+                allowed_account_count=len(key.allowed_account_ids) if key.allowed_account_ids is not None else None,
             )
             for key in keys
         ]
@@ -235,6 +240,163 @@ async def update_api_key_type(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新API密钥类型失败"
+        )
+
+
+@router.patch(
+    "/{key_id}/accounts",
+    response_model=APIKeyResponse,
+    summary="更新API密钥允许的账号",
+    description="修改指定API密钥可使用的账号列表"
+)
+async def update_api_key_accounts(
+    key_id: int,
+    request: APIKeyUpdateAccounts,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: RedisClient = Depends(get_redis),
+):
+    """更新API密钥允许的账号"""
+    try:
+        repo = APIKeyRepository(db)
+
+        # 先读一次旧值用于审计日志
+        old_key = await repo.get_by_id(key_id)
+        if not old_key or old_key.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="API密钥不存在或无权访问"
+            )
+        old_accounts = old_key.allowed_account_ids
+
+        api_key = await repo.update_allowed_accounts(
+            key_id=key_id,
+            user_id=current_user.id,
+            allowed_account_ids=request.allowed_account_ids,
+        )
+
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="API密钥不存在或无权访问"
+            )
+
+        await db.commit()
+
+        logger.info(
+            "api_key allowed_accounts updated: user_id=%s key_id=%s from=%s to=%s",
+            current_user.id,
+            key_id,
+            old_accounts,
+            request.allowed_account_ids,
+        )
+
+        # 清理 API Key 认证缓存
+        try:
+            await redis.delete(f"api_key_auth:{api_key.key}")
+        except Exception:
+            pass
+
+        return APIKeyResponse.model_validate(api_key)
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新API密钥账号失败"
+        )
+
+
+@router.get(
+    "/config-accounts/{config_type}",
+    response_model=List[AccountSummary],
+    summary="获取指定类型的账号列表",
+    description="获取当前用户指定配置类型的所有账号（用于账号选择）"
+)
+async def get_accounts_by_type(
+    config_type: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取指定类型的账号列表"""
+    try:
+        accounts: List[AccountSummary] = []
+
+        if config_type == "codex":
+            from app.models.codex_account import CodexAccount
+            from sqlalchemy import select
+            result = await db.execute(
+                select(CodexAccount)
+                .where(CodexAccount.user_id == current_user.id)
+                .order_by(CodexAccount.created_at.desc())
+            )
+            for acc in result.scalars().all():
+                accounts.append(AccountSummary(
+                    account_id=acc.id,
+                    account_name=acc.account_name,
+                    email=acc.email,
+                    status=acc.status,
+                ))
+
+        elif config_type == "gemini-cli":
+            from app.models.gemini_cli_account import GeminiCLIAccount
+            from sqlalchemy import select
+            result = await db.execute(
+                select(GeminiCLIAccount)
+                .where(GeminiCLIAccount.user_id == current_user.id)
+                .order_by(GeminiCLIAccount.created_at.desc())
+            )
+            for acc in result.scalars().all():
+                accounts.append(AccountSummary(
+                    account_id=acc.id,
+                    account_name=acc.account_name,
+                    email=acc.email,
+                    status=acc.status,
+                ))
+
+        elif config_type == "zai-tts":
+            from app.models.zai_tts_account import ZaiTTSAccount
+            from sqlalchemy import select
+            result = await db.execute(
+                select(ZaiTTSAccount)
+                .where(ZaiTTSAccount.user_id == current_user.id)
+                .order_by(ZaiTTSAccount.created_at.desc())
+            )
+            for acc in result.scalars().all():
+                accounts.append(AccountSummary(
+                    account_id=acc.id,
+                    account_name=acc.account_name,
+                    email=None,
+                    status=acc.status,
+                ))
+
+        elif config_type == "zai-image":
+            from app.models.zai_image_account import ZaiImageAccount
+            from sqlalchemy import select
+            result = await db.execute(
+                select(ZaiImageAccount)
+                .where(ZaiImageAccount.user_id == current_user.id)
+                .order_by(ZaiImageAccount.created_at.desc())
+            )
+            for acc in result.scalars().all():
+                accounts.append(AccountSummary(
+                    account_id=acc.id,
+                    account_name=acc.account_name,
+                    email=None,
+                    status=acc.status,
+                ))
+
+        elif config_type in ("antigravity", "kiro", "qwen"):
+            # 这些类型由插件服务管理，暂不支持账号选择
+            pass
+
+        return accounts
+    except Exception as e:
+        logger.error(f"获取账号列表失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取账号列表失败"
         )
 
 

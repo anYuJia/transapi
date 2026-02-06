@@ -923,6 +923,8 @@ export interface PluginAPIKey {
   created_at: string;
   last_used_at: string | null;
   expires_at: string | null;
+  allowed_account_ids: number[] | null; // 允许使用的账号ID列表；null=全部账号
+  allowed_account_count?: number | null; // 允许使用的账号数量；null=全部账号
 }
 
 export interface CreateAPIKeyResponse {
@@ -935,6 +937,14 @@ export interface CreateAPIKeyResponse {
   created_at: string;
   last_used_at: string | null;
   expires_at: string | null;
+  allowed_account_ids: number[] | null;
+}
+
+export interface AccountSummary {
+  account_id: number;
+  account_name: string;
+  email: string | null;
+  status: number;
 }
 
 /**
@@ -971,13 +981,18 @@ export async function getAPIKeyInfo(): Promise<PluginAPIKey | null> {
  */
 export async function generateAPIKey(
   name: string = 'My API Key',
-  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' = 'antigravity'
+  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' = 'antigravity',
+  allowedAccountIds?: number[] | null
 ): Promise<CreateAPIKeyResponse> {
   return fetchWithAuth<CreateAPIKeyResponse>(
     `${API_BASE_URL}/api/api-keys`,
     {
       method: 'POST',
-      body: JSON.stringify({ name, config_type: configType }),
+      body: JSON.stringify({
+        name,
+        config_type: configType,
+        allowed_account_ids: allowedAccountIds,
+      }),
     }
   );
 }
@@ -1005,6 +1020,34 @@ export async function updateAPIKeyType(
       method: 'PATCH',
       body: JSON.stringify({ config_type: configType }),
     }
+  );
+}
+
+/**
+ * 更新指定 API Key 的允许账号列表
+ */
+export async function updateAPIKeyAccounts(
+  keyId: number,
+  allowedAccountIds: number[] | null
+): Promise<CreateAPIKeyResponse> {
+  return fetchWithAuth<CreateAPIKeyResponse>(
+    `${API_BASE_URL}/api/api-keys/${keyId}/accounts`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ allowed_account_ids: allowedAccountIds }),
+    }
+  );
+}
+
+/**
+ * 获取指定类型的账号列表（用于账号选择）
+ */
+export async function getAccountsByType(
+  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'
+): Promise<AccountSummary[]> {
+  return fetchWithAuth<AccountSummary[]>(
+    `${API_BASE_URL}/api/api-keys/config-accounts/${configType}`,
+    { method: 'GET' }
   );
 }
 

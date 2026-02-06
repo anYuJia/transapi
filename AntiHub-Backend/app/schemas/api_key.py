@@ -1,7 +1,7 @@
 """
 API密钥相关的数据模式
 """
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,10 @@ class APIKeyCreate(BaseModel):
         "antigravity",
         description="配置类型：antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image",
     )
+    allowed_account_ids: Optional[List[int]] = Field(
+        None,
+        description="允许使用的账号ID列表；NULL=全部账号，[]=无账号，[1,2,3]=指定账号",
+    )
 
 
 class APIKeyResponse(BaseModel):
@@ -40,7 +44,11 @@ class APIKeyResponse(BaseModel):
     created_at: datetime
     last_used_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    
+    allowed_account_ids: Optional[List[int]] = Field(
+        None,
+        description="允许使用的账号ID列表；NULL=全部账号",
+    )
+
     model_config = {"from_attributes": True}
 
 
@@ -58,7 +66,15 @@ class APIKeyListResponse(BaseModel):
     created_at: datetime
     last_used_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    
+    allowed_account_ids: Optional[List[int]] = Field(
+        None,
+        description="允许使用的账号ID列表；NULL=全部账号",
+    )
+    allowed_account_count: Optional[int] = Field(
+        None,
+        description="允许使用的账号数量；NULL=全部账号",
+    )
+
     model_config = {"from_attributes": True}
 
 
@@ -73,3 +89,19 @@ class APIKeyUpdateType(BaseModel):
         ...,
         description="配置类型：antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image",
     )
+
+
+class APIKeyUpdateAccounts(BaseModel):
+    """更新API密钥允许的账号"""
+    allowed_account_ids: Optional[List[int]] = Field(
+        None,
+        description="允许使用的账号ID列表；NULL=全部账号，[]=无账号，[1,2,3]=指定账号",
+    )
+
+
+class AccountSummary(BaseModel):
+    """账号摘要（用于账号选择列表）"""
+    account_id: int = Field(..., description="账号ID")
+    account_name: str = Field(..., description="账号名称")
+    email: Optional[str] = Field(None, description="账号邮箱")
+    status: int = Field(..., description="账号状态：0=禁用，1=启用")
