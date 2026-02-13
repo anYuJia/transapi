@@ -14,6 +14,7 @@ APIKeyConfigType = Literal[
     "gemini-cli",
     "zai-tts",
     "zai-image",
+    "custom",
 ]
 
 

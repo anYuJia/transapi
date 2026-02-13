@@ -312,15 +312,40 @@ async def list_models(
         # 如果是JWT token认证（无_config_type），检查请求头
         if config_type is None:
             api_type = request.headers.get("X-Api-Type")
-            if api_type in ["kiro", "antigravity", "qwen", "codex", "gemini-cli", "zai-image", "zai-tts"]:
+            if api_type in ["kiro", "antigravity", "qwen", "codex", "gemini-cli", "zai-image", "zai-tts", "custom"]:
                 config_type = api_type
-        
+
         use_kiro = config_type == "kiro"
         use_codex = config_type == "codex"
         use_gemini_cli = config_type == "gemini-cli"
-        
+        use_custom = config_type == "custom"
+
         if config_type in ("zai-image", "zai-tts"):
             result = {"object": "list", "data": []}
+        elif use_custom:
+            # 从自定义账号的 models 列表构建 OpenAI 格式返回
+            from app.services.custom_account_service import CustomAccountService
+            custom_svc = CustomAccountService(db=antigravity_service.db if hasattr(antigravity_service, 'db') else None)
+            # 获取 DB session 从 request state
+            from app.db.session import get_session_maker
+            session_maker = get_session_maker()
+            async with session_maker() as session:
+                svc = CustomAccountService(session)
+                accounts_data = await svc.list_accounts(current_user.id)
+            all_models = set()
+            for acc_data in accounts_data:
+                if acc_data.get("status") == 1 and acc_data.get("models"):
+                    for m in acc_data["models"]:
+                        all_models.add(m)
+            import time as _time
+            now_ts = int(_time.time())
+            result = {
+                "object": "list",
+                "data": [
+                    {"id": m, "object": "model", "created": now_ts, "owned_by": "custom"}
+                    for m in sorted(all_models)
+                ],
+            }
         elif use_codex:
             result = await codex_service.openai_list_models()
         elif use_gemini_cli:
@@ -961,13 +986,14 @@ async def chat_completions(
     config_type = getattr(current_user, "_config_type", None)
     if config_type is None:
         api_type = raw_request.headers.get("X-Api-Type")
-        if api_type in ["kiro", "antigravity", "qwen", "codex", "gemini-cli", "zai-image", "zai-tts"]:
+        if api_type in ["kiro", "antigravity", "qwen", "codex", "gemini-cli", "zai-image", "zai-tts", "custom"]:
             config_type = api_type
 
     effective_config_type = config_type or "antigravity"
     use_kiro = effective_config_type == "kiro"
     use_codex = effective_config_type == "codex"
     use_gemini_cli = effective_config_type == "gemini-cli"
+    use_custom = effective_config_type == "custom"
 
     if _is_local_image_model(model_name):
         if effective_config_type != "zai-image":
@@ -1151,6 +1177,182 @@ async def chat_completions(
     # 判断使用哪个服务
     if effective_config_type in ("zai-image", "zai-tts"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="config_type does not support chat completions")
+
+    # ==================== Custom (OpenAI 兼容) 代理转发 ====================
+    if use_custom:
+        from app.services.custom_account_service import CustomAccountService
+        from app.db.session import get_session_maker
+
+        session_maker = get_session_maker()
+        async with session_maker() as custom_db:
+            custom_svc = CustomAccountService(custom_db)
+
+            # 获取 allowed_account_ids
+            allowed_ids = getattr(current_user, "_allowed_account_ids", None)
+            account = await custom_svc.select_active_account(current_user.id, allowed_ids)
+            if not account:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有可用的自定义账号")
+
+            if account.api_format != "openai_compatible":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该账号的 api_format 不是 openai_compatible，请使用 /v1/messages 端点",
+                )
+
+            cred = custom_svc.get_decrypted_credentials(account)
+            upstream_api_key = cred.get("api_key", "")
+            upstream_base_url = cred.get("base_url", "").rstrip("/")
+            upstream_proxy = account.proxy_url or None
+
+            await custom_svc.mark_last_used(account.id)
+            await custom_db.commit()
+
+        request_data = request.model_dump()
+        upstream_url = f"{upstream_base_url}/chat/completions"
+        upstream_headers = {
+            "Authorization": f"Bearer {upstream_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        transport = httpx.AsyncHTTPTransport(proxy=upstream_proxy) if upstream_proxy else None
+
+        if request.stream:
+            tracker = SSEUsageTracker()
+
+            async def generate_custom():
+                client = None
+                try:
+                    client = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(300.0, connect=30.0))
+                    async with client.stream("POST", upstream_url, json=request_data, headers=upstream_headers) as resp:
+                        if resp.status_code != 200:
+                            body = await resp.aread()
+                            tracker.success = False
+                            tracker.status_code = resp.status_code
+                            tracker.error_message = body.decode("utf-8", errors="replace")[:500]
+                            err = {"error": {"message": tracker.error_message, "type": "upstream_error", "code": resp.status_code}}
+                            yield f"data: {json.dumps(err, ensure_ascii=False)}\n\n".encode("utf-8")
+                            yield b"data: [DONE]\n\n"
+                            return
+                        async for chunk in resp.aiter_bytes():
+                            tracker.feed(chunk)
+                            yield chunk
+                except Exception as e:
+                    tracker.success = False
+                    tracker.status_code = tracker.status_code or 500
+                    tracker.error_message = str(e)
+                    raise
+                finally:
+                    tracker.finalize()
+                    duration_ms = int((time.monotonic() - start_time) * 1000)
+                    await UsageLogService.record(
+                        user_id=current_user.id,
+                        api_key_id=api_key_id,
+                        endpoint=endpoint,
+                        method=method,
+                        model_name=model_name,
+                        config_type="custom",
+                        stream=True,
+                        input_tokens=tracker.input_tokens,
+                        output_tokens=tracker.output_tokens,
+                        total_tokens=tracker.total_tokens,
+                        success=tracker.success,
+                        status_code=tracker.status_code,
+                        error_message=tracker.error_message,
+                        duration_ms=duration_ms,
+                    )
+                    if client:
+                        try:
+                            await client.aclose()
+                        except Exception:
+                            pass
+
+            return StreamingResponse(
+                generate_custom(),
+                media_type="text/event-stream",
+                headers=_sse_no_buffer_headers(),
+            )
+
+        # 非流式
+        try:
+            async with httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+                resp = await client.post(upstream_url, json=request_data, headers=upstream_headers)
+
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            if resp.status_code != 200:
+                error_body = resp.text[:500]
+                await UsageLogService.record(
+                    user_id=current_user.id,
+                    api_key_id=api_key_id,
+                    endpoint=endpoint,
+                    method=method,
+                    model_name=model_name,
+                    config_type="custom",
+                    stream=False,
+                    success=False,
+                    status_code=resp.status_code,
+                    error_message=error_body,
+                    duration_ms=duration_ms,
+                )
+                try:
+                    error_json = resp.json()
+                except Exception:
+                    error_json = {"error": error_body}
+                return JSONResponse(status_code=resp.status_code, content=error_json)
+
+            result = resp.json()
+            in_tok, out_tok, total_tok = extract_openai_usage(result)
+            await UsageLogService.record(
+                user_id=current_user.id,
+                api_key_id=api_key_id,
+                endpoint=endpoint,
+                method=method,
+                model_name=model_name,
+                config_type="custom",
+                stream=False,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                total_tokens=total_tok,
+                success=True,
+                status_code=200,
+                duration_ms=duration_ms,
+            )
+            return result
+        except httpx.HTTPStatusError as e:
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            await UsageLogService.record(
+                user_id=current_user.id,
+                api_key_id=api_key_id,
+                endpoint=endpoint,
+                method=method,
+                model_name=model_name,
+                config_type="custom",
+                stream=False,
+                success=False,
+                status_code=e.response.status_code,
+                error_message=str(e),
+                duration_ms=duration_ms,
+            )
+            try:
+                upstream_response = e.response.json()
+            except Exception:
+                upstream_response = {"error": e.response.text}
+            return JSONResponse(status_code=e.response.status_code, content=upstream_response)
+        except Exception as e:
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            await UsageLogService.record(
+                user_id=current_user.id,
+                api_key_id=api_key_id,
+                endpoint=endpoint,
+                method=method,
+                model_name=model_name,
+                config_type="custom",
+                stream=False,
+                success=False,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                error_message=str(e),
+                duration_ms=duration_ms,
+            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"自定义代理转发失败: {str(e)}")
 
     try:
         if use_codex:

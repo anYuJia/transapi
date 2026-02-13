@@ -46,6 +46,12 @@ import {
   updateZaiImageAccountName,
   updateZaiImageAccountCredentials,
   deleteZaiImageAccount,
+  getCustomAccounts,
+  updateCustomAccountStatus,
+  updateCustomAccountName,
+  updateCustomAccountModels,
+  deleteCustomAccount,
+  getCustomAccountCredentials,
   type CodexWhamUsageData,
   type Account,
   type AccountProjects,
@@ -57,6 +63,7 @@ import {
   type GeminiCLIQuotaData,
   type ZaiTTSAccount,
   type ZaiImageAccount,
+  type CustomAccount,
 } from '@/lib/api';
 import { AddAccountDrawer } from '@/components/add-account-drawer';
 import { Button } from '@/components/ui/button';
@@ -119,11 +126,12 @@ export default function AccountsPage() {
   const [geminiCliAccounts, setGeminiCliAccounts] = useState<GeminiCLIAccount[]>([]);
   const [zaiTtsAccounts, setZaiTtsAccounts] = useState<ZaiTTSAccount[]>([]);
   const [zaiImageAccounts, setZaiImageAccounts] = useState<ZaiImageAccount[]>([]);
+  const [customAccounts, setCustomAccounts] = useState<CustomAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshingCookieId, setRefreshingCookieId] = useState<string | null>(null);
   const [refreshingCodexAccountId, setRefreshingCodexAccountId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini' | 'zai-tts' | 'zai-image'>('antigravity');
+  const [activeTab, setActiveTab] = useState<'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini' | 'zai-tts' | 'zai-image' | 'custom'>('antigravity');
 
   // 添加账号 Drawer 状态
   const [isAddDrawerOpen, setIsAddDrawerOpen] = useState(false);
@@ -391,6 +399,15 @@ export default function AccountsPage() {
         console.log('未加载ZAI Image账号');
         setZaiImageAccounts([]);
       }
+
+      // 加载自定义账号
+      try {
+        const customData = await getCustomAccounts();
+        setCustomAccounts(customData);
+      } catch (err) {
+        console.log('未加载自定义账号');
+        setCustomAccounts([]);
+      }
     } catch (err) {
       toasterRef.current?.show({
         title: '加载失败',
@@ -404,6 +421,7 @@ export default function AccountsPage() {
       setCodexAccounts([]);
       setZaiTtsAccounts([]);
       setZaiImageAccounts([]);
+      setCustomAccounts([]);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -1702,6 +1720,11 @@ export default function AccountsPage() {
                         <Gemini className="size-4" />
                         GeminiCLI
                       </span>
+                    ) : activeTab === 'custom' ? (
+                      <span className="flex items-center gap-2">
+                        <OpenAI className="size-4" />
+                        Custom
+                      </span>
                     ) : (
                       <span className="flex items-center gap-2">
                         <OpenAI className="size-4" />
@@ -1751,6 +1774,12 @@ export default function AccountsPage() {
                     <span className="flex items-center gap-2">
                       <Gemini className="size-4" />
                       GeminiCLI
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="custom">
+                    <span className="flex items-center gap-2">
+                      <OpenAI className="size-4" />
+                      Custom
                     </span>
                   </SelectItem>
                 </SelectContent>
@@ -2624,6 +2653,167 @@ export default function AccountsPage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() => handleDeleteZaiImageAccount(account.account_id)}
+                                  className="text-red-600"
+                                >
+                                  <IconTrash className="size-4 mr-2" />
+                                  删除
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Custom 自定义账号列表 */}
+        {activeTab === 'custom' && (
+          <Card className="flex min-h-0 flex-1 flex-col">
+            <CardHeader className="text-left">
+              <CardTitle className="text-left">自定义账号</CardTitle>
+              <CardDescription className="text-left">
+                共 {customAccounts.length} 个账号
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col">
+              {customAccounts.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <p className="text-lg mb-2">暂无自定义账号</p>
+                  <p className="text-sm">点击"添加账号"按钮添加您的第一个自定义 API 账号</p>
+                </div>
+              ) : (
+                <div className="flex-1 min-h-0 overflow-auto -mx-6 px-6 md:mx-0 md:px-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[100px]">账号名称</TableHead>
+                        <TableHead className="min-w-[120px]">服务名称</TableHead>
+                        <TableHead className="min-w-[120px]">API 格式</TableHead>
+                        <TableHead className="min-w-[180px]">Base URL</TableHead>
+                        <TableHead className="min-w-[80px]">模型数</TableHead>
+                        <TableHead className="min-w-[80px]">状态</TableHead>
+                        <TableHead className="text-right min-w-[80px]">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {customAccounts.map((account) => (
+                        <TableRow key={account.id}>
+                          <TableCell>{account.account_name || '未命名'}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{account.service_name}</Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {account.api_format === 'openai_compatible' ? 'OpenAI' : 'Anthropic'}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {account.info_hidden ? (
+                              <Badge variant="secondary">已隐藏</Badge>
+                            ) : (
+                              <span className="font-mono text-xs truncate max-w-[180px] inline-block align-bottom">
+                                {account.base_url || '-'}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {account.models ? account.models.length : 0}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={account.status === 1 ? 'default' : 'secondary'}>
+                              {account.status === 1 ? '启用' : '禁用'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <IconDotsVertical className="size-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={async () => {
+                                  const newName = prompt('请输入新名称', account.account_name);
+                                  if (newName && newName !== account.account_name) {
+                                    try {
+                                      await updateCustomAccountName(account.id, newName);
+                                      setCustomAccounts(customAccounts.map(a =>
+                                        a.id === account.id ? { ...a, account_name: newName } : a
+                                      ));
+                                      toasterRef.current?.show({ title: '成功', message: '名称已更新', variant: 'success', position: 'top-right' });
+                                    } catch (err) {
+                                      toasterRef.current?.show({ title: '失败', message: err instanceof Error ? err.message : '重命名失败', variant: 'error', position: 'top-right' });
+                                    }
+                                  }
+                                }}>
+                                  <IconEdit className="size-4 mr-2" />
+                                  重命名
+                                </DropdownMenuItem>
+                                {!account.info_hidden && (
+                                  <DropdownMenuItem onClick={async () => {
+                                    try {
+                                      const cred = await getCustomAccountCredentials(account.id);
+                                      const text = JSON.stringify(cred, null, 2);
+                                      navigator.clipboard.writeText(text);
+                                      toasterRef.current?.show({ title: '已复制', message: '凭据已复制到剪贴板', variant: 'success', position: 'top-right' });
+                                    } catch (err) {
+                                      toasterRef.current?.show({ title: '失败', message: err instanceof Error ? err.message : '导出凭据失败', variant: 'error', position: 'top-right' });
+                                    }
+                                  }}>
+                                    <IconCopy className="size-4 mr-2" />
+                                    导出凭据
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem onClick={async () => {
+                                  const modelsStr = prompt('请输入模型列表（每行一个，留空清除）', (account.models || []).join('\n'));
+                                  if (modelsStr !== null) {
+                                    const models = modelsStr.trim() ? modelsStr.trim().split('\n').map(m => m.trim()).filter(Boolean) : null;
+                                    try {
+                                      await updateCustomAccountModels(account.id, models);
+                                      setCustomAccounts(customAccounts.map(a =>
+                                        a.id === account.id ? { ...a, models } : a
+                                      ));
+                                      toasterRef.current?.show({ title: '成功', message: '模型列表已更新', variant: 'success', position: 'top-right' });
+                                    } catch (err) {
+                                      toasterRef.current?.show({ title: '失败', message: err instanceof Error ? err.message : '更新模型失败', variant: 'error', position: 'top-right' });
+                                    }
+                                  }
+                                }}>
+                                  <IconEdit className="size-4 mr-2" />
+                                  编辑模型
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={async () => {
+                                  const newStatus = account.status === 1 ? 0 : 1;
+                                  try {
+                                    await updateCustomAccountStatus(account.id, newStatus);
+                                    setCustomAccounts(customAccounts.map(a =>
+                                      a.id === account.id ? { ...a, status: newStatus } : a
+                                    ));
+                                    toasterRef.current?.show({ title: '成功', message: newStatus === 1 ? '已启用' : '已禁用', variant: 'success', position: 'top-right' });
+                                  } catch (err) {
+                                    toasterRef.current?.show({ title: '失败', message: err instanceof Error ? err.message : '更新状态失败', variant: 'error', position: 'top-right' });
+                                  }
+                                }}>
+                                  {account.status === 1 ? (
+                                    <><IconToggleLeft className="size-4 mr-2" />禁用</>
+                                  ) : (
+                                    <><IconToggleRight className="size-4 mr-2" />启用</>
+                                  )}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={async () => {
+                                    if (!confirm('确定要删除此账号吗？')) return;
+                                    try {
+                                      await deleteCustomAccount(account.id);
+                                      setCustomAccounts(customAccounts.filter(a => a.id !== account.id));
+                                      toasterRef.current?.show({ title: '成功', message: '账号已删除', variant: 'success', position: 'top-right' });
+                                    } catch (err) {
+                                      toasterRef.current?.show({ title: '失败', message: err instanceof Error ? err.message : '删除失败', variant: 'error', position: 'top-right' });
+                                    }
+                                  }}
                                   className="text-red-600"
                                 >
                                   <IconTrash className="size-4 mr-2" />

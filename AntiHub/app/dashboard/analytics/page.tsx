@@ -50,7 +50,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 
 // 定义标签页状态类型
-type TabType = 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image';
+type TabType = 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' | 'custom';
 
 interface TabState {
   selectedEndpoint: string;
@@ -87,6 +87,7 @@ export default function AnalyticsPage() {
     'gemini-cli': { selectedEndpoint: 'all', timeRange: '7days', customStartDate: '', customEndDate: '', currentPage: 1 },
     'zai-tts': { selectedEndpoint: 'all', timeRange: '7days', customStartDate: '', customEndDate: '', currentPage: 1 },
     'zai-image': { selectedEndpoint: 'all', timeRange: '7days', customStartDate: '', customEndDate: '', currentPage: 1 },
+    custom: { selectedEndpoint: 'all', timeRange: '7days', customStartDate: '', customEndDate: '', currentPage: 1 },
   });
 
   // 获取当前标签页的状态
@@ -163,7 +164,7 @@ export default function AnalyticsPage() {
 
         // 加载所有账号的消费记录并聚合
         await loadKiroLogs(accountsData);
-    } else if (activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image') {
+    } else if (activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image' || activeTab === 'custom') {
         const offset = (currentTabState.currentPage - 1) * pageSize;
         const configType = activeTab;
         const endpointFilter = currentTabState.selectedEndpoint !== 'all' ? currentTabState.selectedEndpoint : undefined;
@@ -331,7 +332,7 @@ export default function AnalyticsPage() {
   const isFirstLoadForTab =
     (activeTab === 'antigravity' && quotas.length === 0 && allConsumptions.length === 0) ||
     (activeTab === 'kiro' && kiroLogs.length === 0 && !kiroStats) ||
-    ((activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image') && requestLogs.length === 0 && !requestStats);
+    ((activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image' || activeTab === 'custom') && requestLogs.length === 0 && !requestStats);
 
   const requestProviderLabel =
     activeTab === 'codex'
@@ -342,6 +343,8 @@ export default function AnalyticsPage() {
           ? 'ZAI TTS'
           : activeTab === 'zai-image'
             ? 'ZAI Image'
+            : activeTab === 'custom'
+              ? 'Custom'
           : 'Qwen';
 
   if (isLoading && isFirstLoadForTab) {
@@ -401,10 +404,15 @@ export default function AnalyticsPage() {
                     <Gemini.Color className="size-4" />
                     GeminiCLI
                   </span>
-                ) : (
+                ) : activeTab === 'codex' ? (
                   <span className="flex items-center gap-2">
                     <OpenAI className="size-4" />
                     Codex
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <img src="/logo_light.png" alt="" className="size-4" />
+                    Custom
                   </span>
                 )}
               </SelectValue>
@@ -452,12 +460,18 @@ export default function AnalyticsPage() {
                   Codex
                 </span>
               </SelectItem>
+              <SelectItem value="custom">
+                <span className="flex items-center gap-2">
+                  <img src="/logo_light.png" alt="" className="size-4" />
+                  Custom
+                </span>
+              </SelectItem>
             </SelectContent>
           </Select>
           </div>
 
           {/* 时间范围选择器 - 仅在请求统计标签页显示 */}
-          {(activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image') && (
+          {(activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image' || activeTab === 'custom') && (
             <div className="flex flex-wrap items-center gap-3">
               <span className="text-sm text-muted-foreground">时间范围:</span>
               <div className="flex gap-2">
@@ -704,7 +718,7 @@ export default function AnalyticsPage() {
         )}
 
         {/* Qwen/Codex/GeminiCLI 请求统计（本系统记录） */}
-        {(activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image') && (
+        {(activeTab === 'qwen' || activeTab === 'codex' || activeTab === 'gemini-cli' || activeTab === 'zai-tts' || activeTab === 'zai-image' || activeTab === 'custom') && (
           <>
             <Card className="mb-6">
               <CardHeader>

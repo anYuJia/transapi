@@ -23,6 +23,7 @@ import {
   importGeminiCLIAccount,
   createZaiTTSAccount,
   createZaiImageAccount,
+  createCustomAccount,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Button as StatefulButton } from '@/components/ui/stateful-button';
@@ -40,6 +41,14 @@ import { IconExternalLink, IconCopy, IconX } from '@tabler/icons-react';
 import { Gemini, OpenAI, Qwen } from '@lobehub/icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import Toaster, { ToasterRef, showToast } from '@/components/ui/toast';
 
 interface AddAccountDrawerProps {
@@ -87,7 +96,7 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
   const [step, setStep] = useState<
     'platform' | 'kiro_provider' | 'method' | 'authorize'
   >('platform');
-  const [platform, setPlatform] = useState<'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini' | 'zai-tts' | 'zai-image' | ''>('');
+  const [platform, setPlatform] = useState<'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini' | 'zai-tts' | 'zai-image' | 'custom' | ''>('');
   const [kiroProvider, setKiroProvider] = useState<'social' | 'aws_idc' | ''>('');
   const [loginMethod, setLoginMethod] = useState<'manual' | 'refresh_token' | ''>(''); // Antigravity 登录方式
   const [kiroLoginMethod, setKiroLoginMethod] = useState<'oauth' | 'refresh_token' | ''>('');
@@ -114,6 +123,17 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
   const [zaiTtsVoiceId, setZaiTtsVoiceId] = useState('system_001');
   const [zaiImageAccountName, setZaiImageAccountName] = useState('');
   const [zaiImageToken, setZaiImageToken] = useState('');
+
+  // Custom 表单状态
+  const [customAccountName, setCustomAccountName] = useState('');
+  const [customServiceName, setCustomServiceName] = useState('');
+  const [customApiFormat, setCustomApiFormat] = useState<'openai_compatible' | 'anthropic'>('openai_compatible');
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [customProxyUrl, setCustomProxyUrl] = useState('');
+  const [customModels, setCustomModels] = useState('');
+  const [customInfoHidden, setCustomInfoHidden] = useState(false);
+
   const [oauthUrl, setOauthUrl] = useState('');
   const [oauthState, setOauthState] = useState(''); // Kiro OAuth state
   const [callbackUrl, setCallbackUrl] = useState('');
@@ -209,7 +229,7 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
         });
         return;
       }
-      if (platform === 'zai-tts' || platform === 'zai-image') {
+      if (platform === 'zai-tts' || platform === 'zai-image' || platform === 'custom') {
         setStep('authorize');
         return;
       }
@@ -1724,6 +1744,14 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
     setZaiTtsVoiceId('system_001');
     setZaiImageAccountName('');
     setZaiImageToken('');
+    setCustomAccountName('');
+    setCustomServiceName('');
+    setCustomApiFormat('openai_compatible');
+    setCustomBaseUrl('');
+    setCustomApiKey('');
+    setCustomProxyUrl('');
+    setCustomModels('');
+    setCustomInfoHidden(false);
     setGeminiCliCredentialJson('');
     setKiroAwsIdcRegion('us-east-1');
     setOauthUrl('');
@@ -2005,6 +2033,35 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
                       Token（Cookie session）
+                    </p>
+                  </div>
+                </label>
+
+                {/* Custom 自定义账号 */}
+                <label
+                  className={cn(
+                    "flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors",
+                    platform === 'custom' ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="platform"
+                    value="custom"
+                    checked={platform === 'custom'}
+                    onChange={(e) => setPlatform(e.target.value as 'custom')}
+                    className="w-4 h-4"
+                  />
+                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                    <OpenAI className="size-6 text-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">自定义账号</h3>
+                      <Badge variant="secondary">通用</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      OpenAI 兼容 / Anthropic API（DeepSeek、OpenRouter 等）
                     </p>
                   </div>
                 </label>
@@ -2444,6 +2501,121 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                       来自 image.z.ai 的 Cookie session
                     </p>
                   </div>
+                </>
+              ) : platform === 'custom' ? (
+                <>
+                  <div className="space-y-3">
+                    <Label htmlFor="custom-account-name" className="text-base font-semibold">
+                      账号名称
+                    </Label>
+                    <Input
+                      id="custom-account-name"
+                      placeholder="给这个账号起个名字"
+                      value={customAccountName}
+                      onChange={(e) => setCustomAccountName(e.target.value)}
+                      className="h-12"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="custom-service-name" className="text-base font-semibold">
+                      服务名称
+                    </Label>
+                    <Input
+                      id="custom-service-name"
+                      placeholder="DeepSeek / OpenRouter / ..."
+                      value={customServiceName}
+                      onChange={(e) => setCustomServiceName(e.target.value)}
+                      className="h-12"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label className="text-base font-semibold">API 格式</Label>
+                    <Select value={customApiFormat} onValueChange={(v) => setCustomApiFormat(v as 'openai_compatible' | 'anthropic')}>
+                      <SelectTrigger className="h-12">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="openai_compatible">OpenAI Compatible</SelectItem>
+                        <SelectItem value="anthropic">Anthropic</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="custom-base-url" className="text-base font-semibold">
+                      Base URL
+                    </Label>
+                    <Input
+                      id="custom-base-url"
+                      placeholder="https://api.deepseek.com/v1"
+                      value={customBaseUrl}
+                      onChange={(e) => setCustomBaseUrl(e.target.value)}
+                      className="font-mono text-sm h-12"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="custom-api-key" className="text-base font-semibold">
+                      API Key
+                    </Label>
+                    <Input
+                      id="custom-api-key"
+                      type="password"
+                      placeholder="sk-..."
+                      value={customApiKey}
+                      onChange={(e) => setCustomApiKey(e.target.value)}
+                      className="font-mono text-sm h-12"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="custom-proxy-url" className="text-base font-semibold">
+                      代理 URL（可选）
+                    </Label>
+                    <Input
+                      id="custom-proxy-url"
+                      placeholder="http://proxy:port"
+                      value={customProxyUrl}
+                      onChange={(e) => setCustomProxyUrl(e.target.value)}
+                      className="font-mono text-sm h-12"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="custom-models" className="text-base font-semibold">
+                      模型列表（可选）
+                    </Label>
+                    <Textarea
+                      id="custom-models"
+                      placeholder="每行一个模型名，如：&#10;deepseek-chat&#10;deepseek-coder"
+                      value={customModels}
+                      onChange={(e) => setCustomModels(e.target.value)}
+                      className="font-mono text-sm [field-sizing:fixed] min-h-[80px] max-h-[160px] overflow-y-auto"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-muted/30 border border-border rounded-lg">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-semibold">隐藏敏感信息</Label>
+                      <p className="text-xs text-muted-foreground">
+                        开启后 API Key 和 Base URL 将无法再查看和导出
+                      </p>
+                    </div>
+                    <Switch
+                      isSelected={customInfoHidden}
+                      onChange={setCustomInfoHidden}
+                    />
+                  </div>
+
+                  {customInfoHidden && (
+                    <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                      <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                        <strong>警告</strong>：开启后保存的 API Key 和 Base URL 将被加密存储，无法再查看或导出。请确保你已安全保存这些信息。
+                      </p>
+                    </div>
+                  )}
                 </>
               ) : platform === 'codex' ? (
                 <>
@@ -3467,6 +3639,55 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
               <StatefulButton
                 onClick={handleCreateZaiImageAccount}
                 disabled={!zaiImageToken.trim()}
+                className="flex-1 cursor-pointer"
+              >
+                完成添加
+              </StatefulButton>
+            ) : platform === 'custom' ? (
+              <StatefulButton
+                onClick={async () => {
+                  if (!customAccountName.trim() || !customServiceName.trim() || !customBaseUrl.trim() || !customApiKey.trim()) {
+                    toasterRef.current?.show({
+                      title: '信息不完整',
+                      message: '请填写账号名称、服务名称、Base URL 和 API Key',
+                      variant: 'warning',
+                      position: 'top-right',
+                    });
+                    return;
+                  }
+                  try {
+                    const models = customModels.trim()
+                      ? customModels.trim().split('\n').map(m => m.trim()).filter(Boolean)
+                      : undefined;
+                    await createCustomAccount({
+                      account_name: customAccountName.trim(),
+                      service_name: customServiceName.trim(),
+                      api_format: customApiFormat,
+                      base_url: customBaseUrl.trim(),
+                      api_key: customApiKey.trim(),
+                      proxy_url: customProxyUrl.trim() || undefined,
+                      models: models && models.length > 0 ? models : undefined,
+                      info_hidden: customInfoHidden,
+                    });
+                    toasterRef.current?.show({
+                      title: '添加成功',
+                      message: '自定义账号已添加',
+                      variant: 'success',
+                      position: 'top-right',
+                    });
+                    onSuccess?.();
+                    handleClose();
+                  } catch (err) {
+                    toasterRef.current?.show({
+                      title: '添加失败',
+                      message: err instanceof Error ? err.message : '创建自定义账号失败',
+                      variant: 'error',
+                      position: 'top-right',
+                    });
+                    throw err;
+                  }
+                }}
+                disabled={!customAccountName.trim() || !customServiceName.trim() || !customBaseUrl.trim() || !customApiKey.trim()}
                 className="flex-1 cursor-pointer"
               >
                 完成添加

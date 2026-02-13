@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.usage_log import UsageLog
@@ -323,3 +323,41 @@ class UsageLogRepository:
             "by_endpoint": by_endpoint,
             "recent_requests": recent_requests,
         }
+
+    async def get_hourly_stats(
+        self,
+        *,
+        user_id: int,
+        api_key_id: Optional[int] = None,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+        config_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """按小时 + 模型分桶聚合，用于 API Key 详情页图表"""
+        hour_bucket = func.date_trunc(text("'hour'"), UsageLog.created_at).label("hour")
+        stmt = select(
+            hour_bucket,
+            UsageLog.model_name,
+            func.count(UsageLog.id).label("request_count"),
+            func.coalesce(func.sum(UsageLog.quota_consumed), 0).label("quota_consumed"),
+        )
+        stmt = self._apply_filters(
+            stmt,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            start_at=start_at,
+            end_at=end_at,
+            config_type=config_type,
+        )
+        stmt = stmt.group_by(hour_bucket, UsageLog.model_name).order_by(hour_bucket)
+        result = await self.db.execute(stmt)
+        rows = result.all()
+        return [
+            {
+                "hour": r.hour.isoformat() if r.hour else None,
+                "model_id": r.model_name or "unknown",
+                "quota_consumed": str(r.quota_consumed),
+                "request_count": str(r.request_count),
+            }
+            for r in rows
+        ]

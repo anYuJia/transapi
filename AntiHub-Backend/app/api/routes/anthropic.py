@@ -138,10 +138,11 @@ async def _create_message_impl(
 
             # 如果是 JWT token 认证（无 _config_type），检查请求头（保持现有约束）
             api_type = raw_request.headers.get("X-Api-Type")
-            if api_type in ["kiro", "antigravity", "qwen"]:
+            if api_type in ["kiro", "antigravity", "qwen", "custom"]:
                 config_type = api_type
 
         use_kiro = config_type == "kiro"
+        use_custom = config_type == "custom"
 
         if use_kiro:
             # 检查beta权限
@@ -158,6 +159,175 @@ async def _create_message_impl(
         # 提取thinking配置
         thinking_config = getattr(request, "thinking", None)
         thinking_enabled = is_thinking_enabled(thinking_config)
+
+        # ==================== Custom (Anthropic 格式) 直通代理 ====================
+        if use_custom:
+            import httpx
+            import time
+            from app.services.custom_account_service import CustomAccountService
+            from app.db.session import get_session_maker
+            from app.services.usage_log_service import UsageLogService
+
+            session_maker = get_session_maker()
+            async with session_maker() as custom_db:
+                custom_svc = CustomAccountService(custom_db)
+                allowed_ids = getattr(current_user, "_allowed_account_ids", None)
+                account = await custom_svc.select_active_account(current_user.id, allowed_ids)
+                if not account:
+                    error_response = AnthropicAdapter.create_error_response(
+                        error_type="permission_error",
+                        message="没有可用的自定义账号",
+                    )
+                    return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content=error_response.model_dump())
+
+                if account.api_format != "anthropic":
+                    error_response = AnthropicAdapter.create_error_response(
+                        error_type="invalid_request_error",
+                        message="该账号的 api_format 不是 anthropic，请使用 /v1/chat/completions 端点",
+                    )
+                    return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=error_response.model_dump())
+
+                cred = custom_svc.get_decrypted_credentials(account)
+                upstream_api_key = cred.get("api_key", "")
+                upstream_base_url = cred.get("base_url", "").rstrip("/")
+                upstream_proxy = account.proxy_url or None
+                await custom_svc.mark_last_used(account.id)
+                await custom_db.commit()
+
+            upstream_url = f"{upstream_base_url}/v1/messages"
+            upstream_headers = {
+                "x-api-key": upstream_api_key,
+                "anthropic-version": anthropic_version or "2023-06-01",
+                "content-type": "application/json",
+            }
+            if anthropic_beta:
+                upstream_headers["anthropic-beta"] = anthropic_beta
+
+            request_body = request.model_dump(exclude_none=True)
+            transport = httpx.AsyncHTTPTransport(proxy=upstream_proxy) if upstream_proxy else None
+            start_time = time.monotonic()
+
+            if request.stream:
+                async def generate_custom_anthropic():
+                    client = None
+                    success = True
+                    status_code = 200
+                    error_message = None
+                    try:
+                        client = httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(300.0, connect=30.0))
+                        async with client.stream("POST", upstream_url, json=request_body, headers=upstream_headers) as resp:
+                            if resp.status_code != 200:
+                                body = await resp.aread()
+                                success = False
+                                status_code = resp.status_code
+                                error_message = body.decode("utf-8", errors="replace")[:500]
+                                yield body
+                                return
+                            async for chunk in resp.aiter_bytes():
+                                yield chunk
+                    except Exception as e:
+                        success = False
+                        status_code = 500
+                        error_message = str(e)
+                        raise
+                    finally:
+                        duration_ms = int((time.monotonic() - start_time) * 1000)
+                        await UsageLogService.record(
+                            user_id=current_user.id,
+                            api_key_id=api_key_id,
+                            endpoint=endpoint,
+                            method="POST",
+                            model_name=str(request.model or ""),
+                            config_type="custom",
+                            stream=True,
+                            success=success,
+                            status_code=status_code,
+                            error_message=error_message,
+                            duration_ms=duration_ms,
+                        )
+                        if client:
+                            try:
+                                await client.aclose()
+                            except Exception:
+                                pass
+
+                return StreamingResponse(
+                    generate_custom_anthropic(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache, no-transform",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            # 非流式
+            try:
+                async with httpx.AsyncClient(transport=transport, timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+                    resp = await client.post(upstream_url, json=request_body, headers=upstream_headers)
+
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                if resp.status_code != 200:
+                    await UsageLogService.record(
+                        user_id=current_user.id,
+                        api_key_id=api_key_id,
+                        endpoint=endpoint,
+                        method="POST",
+                        model_name=str(request.model or ""),
+                        config_type="custom",
+                        stream=False,
+                        success=False,
+                        status_code=resp.status_code,
+                        error_message=resp.text[:500],
+                        duration_ms=duration_ms,
+                    )
+                    try:
+                        error_json = resp.json()
+                    except Exception:
+                        error_json = {"type": "error", "error": {"type": "upstream_error", "message": resp.text[:500]}}
+                    return JSONResponse(status_code=resp.status_code, content=error_json)
+
+                result = resp.json()
+                # 提取 usage
+                usage = result.get("usage", {})
+                in_tok = usage.get("input_tokens", 0)
+                out_tok = usage.get("output_tokens", 0)
+                await UsageLogService.record(
+                    user_id=current_user.id,
+                    api_key_id=api_key_id,
+                    endpoint=endpoint,
+                    method="POST",
+                    model_name=str(request.model or ""),
+                    config_type="custom",
+                    stream=False,
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                    total_tokens=in_tok + out_tok,
+                    success=True,
+                    status_code=200,
+                    duration_ms=duration_ms,
+                )
+                return JSONResponse(status_code=200, content=result)
+            except Exception as e:
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                await UsageLogService.record(
+                    user_id=current_user.id,
+                    api_key_id=api_key_id,
+                    endpoint=endpoint,
+                    method="POST",
+                    model_name=str(request.model or ""),
+                    config_type="custom",
+                    stream=False,
+                    success=False,
+                    status_code=500,
+                    error_message=str(e),
+                    duration_ms=duration_ms,
+                )
+                error_response = AnthropicAdapter.create_error_response(
+                    error_type="api_error",
+                    message=f"自定义代理转发失败: {str(e)}",
+                )
+                return JSONResponse(status_code=500, content=error_response.model_dump())
 
         # Kiro 通道：直接把 Anthropic Messages 转为 conversationState（参考 kiro.rs 结构）
         # 其它通道：继续走 Anthropic -> OpenAI 转换，转发到 plug-in chat/completions

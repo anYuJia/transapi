@@ -18,9 +18,9 @@ SPEC_CONFIG_TYPE_ALLOWLIST_CURRENT: Final[Mapping[SpecName, FrozenSet[str]]] = {
     # Report.md 3.1
     "OAIResponses": frozenset({"codex"}),
     # Report.md 3.2
-    "OAIChat": frozenset({"antigravity", "kiro", "qwen", "gemini-cli"}),
+    "OAIChat": frozenset({"antigravity", "kiro", "qwen", "gemini-cli", "custom"}),
     # Report.md 3.3
-    "Claude": frozenset({"antigravity", "kiro", "qwen"}),
+    "Claude": frozenset({"antigravity", "kiro", "qwen", "custom"}),
     # Report.md 3.4
     "Gemini": frozenset({"gemini-cli", "zai-image", "antigravity"}),
 }
@@ -29,8 +29,8 @@ SPEC_CONFIG_TYPE_ALLOWLIST_CURRENT: Final[Mapping[SpecName, FrozenSet[str]]] = {
 # 目标态白名单（默认不启用）
 SPEC_CONFIG_TYPE_ALLOWLIST_TARGET: Final[Mapping[SpecName, FrozenSet[str]]] = {
     "OAIResponses": frozenset({"codex"}),
-    "OAIChat": frozenset({"antigravity", "kiro", "qwen", "gemini-cli", "codex"}),
-    "Claude": frozenset({"antigravity", "kiro", "qwen"}),
+    "OAIChat": frozenset({"antigravity", "kiro", "qwen", "gemini-cli", "codex", "custom"}),
+    "Claude": frozenset({"antigravity", "kiro", "qwen", "custom"}),
     "Gemini": frozenset({"gemini-cli", "zai-image", "antigravity"}),
 }
 

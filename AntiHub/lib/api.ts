@@ -918,7 +918,7 @@ export interface PluginAPIKey {
   key?: string; // 完整密钥（仅在详情接口返回）
   key_preview: string;
   name: string;
-  config_type: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'; // 配置类型
+  config_type: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' | 'custom'; // 配置类型
   is_active: boolean;
   created_at: string;
   last_used_at: string | null;
@@ -932,7 +932,7 @@ export interface CreateAPIKeyResponse {
   user_id: number;
   key: string;
   name: string;
-  config_type: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'; // 配置类型
+  config_type: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' | 'custom'; // 配置类型
   is_active: boolean;
   created_at: string;
   last_used_at: string | null;
@@ -981,7 +981,7 @@ export async function getAPIKeyInfo(): Promise<PluginAPIKey | null> {
  */
 export async function generateAPIKey(
   name: string = 'My API Key',
-  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' = 'antigravity',
+  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' | 'custom' = 'antigravity',
   allowedAccountIds?: number[] | null
 ): Promise<CreateAPIKeyResponse> {
   return fetchWithAuth<CreateAPIKeyResponse>(
@@ -1012,7 +1012,7 @@ export async function deleteAPIKey(keyId: number): Promise<any> {
  */
 export async function updateAPIKeyType(
   keyId: number,
-  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'
+  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' | 'custom'
 ): Promise<CreateAPIKeyResponse> {
   return fetchWithAuth<CreateAPIKeyResponse>(
     `${API_BASE_URL}/api/api-keys/${keyId}/type`,
@@ -1043,7 +1043,7 @@ export async function updateAPIKeyAccounts(
  * 获取指定类型的账号列表（用于账号选择）
  */
 export async function getAccountsByType(
-  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'
+  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' | 'custom'
 ): Promise<AccountSummary[]> {
   return fetchWithAuth<AccountSummary[]>(
     `${API_BASE_URL}/api/api-keys/config-accounts/${configType}`,
@@ -1350,7 +1350,7 @@ export async function getAPIKeyUsageStats(
 
 // ==================== 聊天相关 API ====================
 
-export type ApiType = 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image';
+export type ApiType = 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' | 'custom';
 
 export interface OpenAIModel {
   id: string;
@@ -2790,4 +2790,121 @@ export async function deleteGeminiCLIAccount(accountId: number): Promise<any> {
     { method: 'DELETE' }
   );
   return result.data;
+}
+
+
+// ==================== 自定义账号管理 ====================
+
+export interface CustomAccount {
+  id: number;
+  user_id: number;
+  account_name: string;
+  service_name: string;
+  api_format: string;
+  base_url: string | null;
+  proxy_url: string | null;
+  models: string[] | null;
+  info_hidden: boolean;
+  status: number;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+}
+
+export interface CreateCustomAccountPayload {
+  account_name: string;
+  service_name: string;
+  api_format: string;
+  base_url: string;
+  api_key: string;
+  proxy_url?: string;
+  models?: string[];
+  info_hidden?: boolean;
+}
+
+/**
+ * 获取自定义账号列表
+ */
+export async function getCustomAccounts(): Promise<CustomAccount[]> {
+  const result = await fetchWithAuth<{ success: boolean; data: CustomAccount[] }>(
+    `${API_BASE_URL}/api/custom/accounts`
+  );
+  return result.data;
+}
+
+/**
+ * 创建自定义账号
+ */
+export async function createCustomAccount(payload: CreateCustomAccountPayload): Promise<CustomAccount> {
+  const result = await fetchWithAuth<{ success: boolean; data: CustomAccount }>(
+    `${API_BASE_URL}/api/custom/accounts`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+  return result.data;
+}
+
+/**
+ * 获取自定义账号凭据
+ */
+export async function getCustomAccountCredentials(accountId: number): Promise<Record<string, any>> {
+  const result = await fetchWithAuth<{ success: boolean; data: Record<string, any> }>(
+    `${API_BASE_URL}/api/custom/accounts/${accountId}/credentials`
+  );
+  return result.data;
+}
+
+/**
+ * 更新自定义账号状态
+ */
+export async function updateCustomAccountStatus(accountId: number, status: number): Promise<CustomAccount> {
+  const result = await fetchWithAuth<{ success: boolean; data: CustomAccount }>(
+    `${API_BASE_URL}/api/custom/accounts/${accountId}/status`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    }
+  );
+  return result.data;
+}
+
+/**
+ * 更新自定义账号名称
+ */
+export async function updateCustomAccountName(accountId: number, name: string): Promise<CustomAccount> {
+  const result = await fetchWithAuth<{ success: boolean; data: CustomAccount }>(
+    `${API_BASE_URL}/api/custom/accounts/${accountId}/name`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ account_name: name }),
+    }
+  );
+  return result.data;
+}
+
+/**
+ * 更新自定义账号模型列表
+ */
+export async function updateCustomAccountModels(accountId: number, models: string[] | null): Promise<CustomAccount> {
+  const result = await fetchWithAuth<{ success: boolean; data: CustomAccount }>(
+    `${API_BASE_URL}/api/custom/accounts/${accountId}/models`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ models }),
+    }
+  );
+  return result.data;
+}
+
+/**
+ * 删除自定义账号
+ */
+export async function deleteCustomAccount(accountId: number): Promise<any> {
+  const result = await fetchWithAuth<{ success: boolean }>(
+    `${API_BASE_URL}/api/custom/accounts/${accountId}`,
+    { method: 'DELETE' }
+  );
+  return result;
 }

@@ -362,8 +362,8 @@ async def get_request_usage_logs(
             raise ValueError("limit 必须在 1-200 之间")
         if offset < 0:
             raise ValueError("offset 不能小于 0")
-        if config_type and config_type not in ("antigravity", "kiro", "qwen", "codex", "gemini-cli", "zai-tts", "zai-image"):
-            raise ValueError("config_type 必须是 antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image")
+        if config_type and config_type not in ("antigravity", "kiro", "qwen", "codex", "gemini-cli", "zai-tts", "zai-image", "custom"):
+            raise ValueError("config_type 必须是 antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image / custom")
 
         start_at = _parse_iso_datetime(start_date)
         end_at = _parse_iso_datetime(end_date)
@@ -420,8 +420,8 @@ async def get_request_usage_stats(
     db: AsyncSession = Depends(get_db_session),
 ):
     try:
-        if config_type and config_type not in ("antigravity", "kiro", "qwen", "codex", "gemini-cli", "zai-tts", "zai-image"):
-            raise ValueError("config_type 必须是 antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image")
+        if config_type and config_type not in ("antigravity", "kiro", "qwen", "codex", "gemini-cli", "zai-tts", "zai-image", "custom"):
+            raise ValueError("config_type 必须是 antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image / custom")
 
         start_at = _parse_iso_datetime(start_date)
         end_at = _parse_iso_datetime(end_date)

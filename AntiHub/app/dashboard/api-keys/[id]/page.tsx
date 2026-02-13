@@ -105,6 +105,7 @@ const CONFIG_TYPES = [
   { value: 'gemini-cli', label: 'Gemini CLI', color: 'bg-red-500' },
   { value: 'zai-tts', label: 'ZAI TTS', color: 'bg-pink-500' },
   { value: 'zai-image', label: 'ZAI Image', color: 'bg-indigo-500' },
+  { value: 'custom', label: 'Custom', color: 'bg-gray-500' },
 ] as const;
 
 export default function APIKeyDetailPage() {

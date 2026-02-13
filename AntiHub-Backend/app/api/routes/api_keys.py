@@ -391,6 +391,22 @@ async def get_accounts_by_type(
             # 这些类型由插件服务管理，暂不支持账号选择
             pass
 
+        elif config_type == "custom":
+            from app.models.custom_account import CustomAccount
+            from sqlalchemy import select
+            result = await db.execute(
+                select(CustomAccount)
+                .where(CustomAccount.user_id == current_user.id)
+                .order_by(CustomAccount.created_at.desc())
+            )
+            for acc in result.scalars().all():
+                accounts.append(AccountSummary(
+                    account_id=acc.id,
+                    account_name=acc.account_name,
+                    email=None,
+                    status=acc.status,
+                ))
+
         return accounts
     except Exception as e:
         logger.error(f"获取账号列表失败: {e}")
@@ -455,7 +471,7 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
 @router.get(
     "/{key_id}/usage/stats",
     summary="获取API密钥用量统计",
-    description="获取指定API密钥的用量统计信息（从 Kiro 消费记录）"
+    description="获取指定API密钥的用量统计信息（Kiro 从插件API，其他类型从本地用量日志）"
 )
 async def get_api_key_usage_stats(
     key_id: int,
@@ -465,13 +481,9 @@ async def get_api_key_usage_stats(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    获取API密钥的用量统计（从 kiro_consumption_log 表）
-    包括：
-    - 总请求数
-    - 成功/失败请求数
-    - Token 用量
-    - 配额消耗
-    - 按 model、endpoint 分组的统计
+    获取API密钥的用量统计
+    - kiro 类型：从 kiro_consumption_log 表（插件 API）
+    - 其他类型（custom, codex, gemini-cli 等）：从本地 usage_logs 表
     """
     try:
         # 验证 API Key 是否属于当前用户
@@ -490,27 +502,100 @@ async def get_api_key_usage_stats(
                 detail="无权访问此API密钥"
             )
 
-        # 调用插件 API 获取统计数据
-        import httpx
-        from app.core.config import settings
+        config_type = api_key.config_type
 
-        plugin_url = f"{settings.plugin_api_base_url}/api/kiro/usage/by-api-key/{key_id}"
-        params = {}
-        if start_date:
-            params["start_date"] = start_date
-        if end_date:
-            params["end_date"] = end_date
+        if config_type == "kiro":
+            # Kiro 类型 — 调用插件 API 获取统计数据
+            import httpx
+            from app.core.config import settings
 
-        headers = {
-            "Authorization": f"Bearer {settings.plugin_api_admin_key}"
-        }
+            plugin_url = f"{settings.plugin_api_base_url}/api/kiro/usage/by-api-key/{key_id}"
+            params = {}
+            if start_date:
+                params["start_date"] = start_date
+            if end_date:
+                params["end_date"] = end_date
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(plugin_url, params=params, headers=headers)
+            headers = {
+                "Authorization": f"Bearer {settings.plugin_api_admin_key}"
+            }
 
-            if response.status_code != 200:
-                logger.error(f"插件API调用失败: {response.status_code} - {response.text}")
-                # 如果插件API失败，返回空数据
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(plugin_url, params=params, headers=headers)
+
+                if response.status_code != 200:
+                    logger.error(f"插件API调用失败: {response.status_code} - {response.text}")
+                    return {
+                        "success": True,
+                        "data": {
+                            "api_key_id": key_id,
+                            "api_key_name": api_key.name,
+                            "range": {
+                                "start_date": start_date,
+                                "end_date": end_date,
+                            },
+                            "total_requests": 0,
+                            "success_requests": 0,
+                            "failed_requests": 0,
+                            "success_rate": 0.0,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "total_tokens": 0,
+                            "total_quota_consumed": 0.0,
+                            "avg_duration_ms": 0.0,
+                            "by_config_type": {"kiro": {"total_requests": 0, "success_requests": 0, "failed_requests": 0, "success_rate": 0.0, "total_tokens": 0, "total_quota_consumed": 0.0}},
+                            "by_model": {},
+                            "by_endpoint": {},
+                            "hourly_model_stats": [],
+                            "recent_requests": []
+                        }
+                    }
+
+                plugin_data = response.json()
+                if not plugin_data.get("success"):
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="获取统计数据失败"
+                    )
+
+                stats = plugin_data["data"]
+                base_stats = stats["base"]
+
+                total_reqs = int(base_stats.get("total_requests") or 0)
+                success_reqs = int(base_stats.get("success_requests") or 0)
+                success_rate = round((success_reqs / total_reqs * 100), 1) if total_reqs > 0 else 0.0
+
+                by_model = {}
+                for row in stats.get("by_model", []):
+                    model_name = row.get("model_id") or "unknown"
+                    model_total = int(row.get("total_requests") or 0)
+                    model_success = int(row.get("success_requests") or 0)
+                    by_model[model_name] = {
+                        "total_requests": model_total,
+                        "success_requests": model_success,
+                        "failed_requests": int(row.get("failed_requests") or 0),
+                        "success_rate": round((model_success / model_total * 100), 1) if model_total > 0 else 0.0,
+                        "total_tokens": int(row.get("total_tokens") or 0),
+                        "total_quota_consumed": float(row.get("total_quota_consumed") or 0.0)
+                    }
+
+                by_endpoint = {}
+                for row in stats.get("by_endpoint", []):
+                    endpoint_name = row.get("endpoint") or "unknown"
+                    endpoint_total = int(row.get("total_requests") or 0)
+                    endpoint_success = int(row.get("success_requests") or 0)
+                    by_endpoint[endpoint_name] = {
+                        "total_requests": endpoint_total,
+                        "success_requests": endpoint_success,
+                        "failed_requests": int(row.get("failed_requests") or 0),
+                        "success_rate": round((endpoint_success / endpoint_total * 100), 1) if endpoint_total > 0 else 0.0,
+                        "input_tokens": int(row.get("input_tokens") or 0),
+                        "output_tokens": int(row.get("output_tokens") or 0),
+                        "total_tokens": int(row.get("total_tokens") or 0),
+                        "total_quota_consumed": float(row.get("total_quota_consumed") or 0.0),
+                        "avg_duration_ms": float(row.get("avg_duration_ms") or 0.0)
+                    }
+
                 return {
                     "success": True,
                     "data": {
@@ -520,69 +605,51 @@ async def get_api_key_usage_stats(
                             "start_date": start_date,
                             "end_date": end_date,
                         },
-                        "total_requests": 0,
-                        "success_requests": 0,
-                        "failed_requests": 0,
-                        "success_rate": 0.0,
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "total_tokens": 0,
-                        "total_quota_consumed": 0.0,
-                        "avg_duration_ms": 0.0,
-                        "by_config_type": {"kiro": {"total_requests": 0, "success_requests": 0, "failed_requests": 0, "success_rate": 0.0, "total_tokens": 0, "total_quota_consumed": 0.0}},
-                        "by_model": {},
-                        "by_endpoint": {},
-                        "recent_requests": []
-                    }
+                        "total_requests": total_reqs,
+                        "success_requests": success_reqs,
+                        "failed_requests": int(base_stats.get("failed_requests") or 0),
+                        "success_rate": success_rate,
+                        "input_tokens": int(base_stats.get("input_tokens") or 0),
+                        "output_tokens": int(base_stats.get("output_tokens") or 0),
+                        "total_tokens": int(base_stats.get("total_tokens") or 0),
+                        "total_quota_consumed": float(base_stats.get("total_quota_consumed") or 0.0),
+                        "avg_duration_ms": float(base_stats.get("avg_duration_ms") or 0.0),
+                        "by_config_type": {
+                            "kiro": {
+                                "total_requests": total_reqs,
+                                "success_requests": success_reqs,
+                                "failed_requests": int(base_stats.get("failed_requests") or 0),
+                                "success_rate": success_rate,
+                                "total_tokens": int(base_stats.get("total_tokens") or 0),
+                                "total_quota_consumed": float(base_stats.get("total_quota_consumed") or 0.0)
+                            }
+                        },
+                        "by_model": by_model,
+                        "by_endpoint": by_endpoint,
+                        "hourly_model_stats": stats.get("hourly_model_stats", []),
+                        "recent_requests": stats.get("recent_requests", [])
+                    },
                 }
+        else:
+            # 非 kiro 类型（custom, codex, gemini-cli 等）— 使用本地 UsageLogRepository
+            start_at = _parse_iso_datetime(start_date)
+            end_at = _parse_iso_datetime(end_date)
 
-            plugin_data = response.json()
-            if not plugin_data.get("success"):
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="获取统计数据失败"
-                )
-
-            stats = plugin_data["data"]
-            base_stats = stats["base"]
-
-            # 计算成功率
-            total_reqs = int(base_stats.get("total_requests") or 0)
-            success_reqs = int(base_stats.get("success_requests") or 0)
-            success_rate = round((success_reqs / total_reqs * 100), 1) if total_reqs > 0 else 0.0
-
-            # 转换 by_model 数据格式
-            by_model = {}
-            for row in stats.get("by_model", []):
-                model_name = row.get("model_id") or "unknown"
-                model_total = int(row.get("total_requests") or 0)
-                model_success = int(row.get("success_requests") or 0)
-                by_model[model_name] = {
-                    "total_requests": model_total,
-                    "success_requests": model_success,
-                    "failed_requests": int(row.get("failed_requests") or 0),
-                    "success_rate": round((model_success / model_total * 100), 1) if model_total > 0 else 0.0,
-                    "total_tokens": int(row.get("total_tokens") or 0),
-                    "total_quota_consumed": float(row.get("total_quota_consumed") or 0.0)
-                }
-
-            # 转换 by_endpoint 数据格式
-            by_endpoint = {}
-            for row in stats.get("by_endpoint", []):
-                endpoint_name = row.get("endpoint") or "unknown"
-                endpoint_total = int(row.get("total_requests") or 0)
-                endpoint_success = int(row.get("success_requests") or 0)
-                by_endpoint[endpoint_name] = {
-                    "total_requests": endpoint_total,
-                    "success_requests": endpoint_success,
-                    "failed_requests": int(row.get("failed_requests") or 0),
-                    "success_rate": round((endpoint_success / endpoint_total * 100), 1) if endpoint_total > 0 else 0.0,
-                    "input_tokens": int(row.get("input_tokens") or 0),
-                    "output_tokens": int(row.get("output_tokens") or 0),
-                    "total_tokens": int(row.get("total_tokens") or 0),
-                    "total_quota_consumed": float(row.get("total_quota_consumed") or 0.0),
-                    "avg_duration_ms": float(row.get("avg_duration_ms") or 0.0)
-                }
+            repo = UsageLogRepository(db)
+            stats_data = await repo.get_stats(
+                user_id=current_user.id,
+                api_key_id=key_id,
+                start_at=start_at,
+                end_at=end_at,
+                config_type=config_type,
+            )
+            hourly_data = await repo.get_hourly_stats(
+                user_id=current_user.id,
+                api_key_id=key_id,
+                start_at=start_at,
+                end_at=end_at,
+                config_type=config_type,
+            )
 
             return {
                 "success": True,
@@ -593,29 +660,8 @@ async def get_api_key_usage_stats(
                         "start_date": start_date,
                         "end_date": end_date,
                     },
-                    "total_requests": total_reqs,
-                    "success_requests": success_reqs,
-                    "failed_requests": int(base_stats.get("failed_requests") or 0),
-                    "success_rate": success_rate,
-                    "input_tokens": int(base_stats.get("input_tokens") or 0),
-                    "output_tokens": int(base_stats.get("output_tokens") or 0),
-                    "total_tokens": int(base_stats.get("total_tokens") or 0),
-                    "total_quota_consumed": float(base_stats.get("total_quota_consumed") or 0.0),
-                    "avg_duration_ms": float(base_stats.get("avg_duration_ms") or 0.0),
-                    "by_config_type": {
-                        "kiro": {
-                            "total_requests": total_reqs,
-                            "success_requests": success_reqs,
-                            "failed_requests": int(base_stats.get("failed_requests") or 0),
-                            "success_rate": success_rate,
-                            "total_tokens": int(base_stats.get("total_tokens") or 0),
-                            "total_quota_consumed": float(base_stats.get("total_quota_consumed") or 0.0)
-                        }
-                    },
-                    "by_model": by_model,
-                    "by_endpoint": by_endpoint,
-                    "hourly_model_stats": stats.get("hourly_model_stats", []),
-                    "recent_requests": stats.get("recent_requests", [])
+                    **stats_data,
+                    "hourly_model_stats": hourly_data,
                 },
             }
     except HTTPException:
